@@ -1,6 +1,7 @@
 import '../global.css';
 import { useEffect } from 'react';
 import { Stack } from 'expo-router';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as SecureStore from 'expo-secure-store';
 import { authService } from '@/services/auth';
@@ -49,7 +50,10 @@ function RootLayoutInner() {
     bootstrap();
   }, []);
 
-  // Bare Stack — Expo Router auto-discovers all routes.
-  // No explicit Stack.Screen declarations needed here.
-  return <Stack screenOptions={{ headerShown: false }} />;
+  // GestureHandlerRootView is required at the root for Swipeable + gesture-handler to work.
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <Stack screenOptions={{ headerShown: false }} />
+    </GestureHandlerRootView>
+  );
 }

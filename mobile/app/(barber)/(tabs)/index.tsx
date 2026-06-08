@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
   Pressable,
   Modal,
+  Animated,
   useWindowDimensions,
   Platform,
   TouchableOpacity,
@@ -16,6 +17,7 @@ import { format, addDays, startOfWeek, isSameDay } from 'date-fns';
 import { Bell, Plus, X, Clock } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import type { BarberProfile } from '@/types/user';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 
 // ─── Event types ──────────────────────────────────────────────────────────────
 
@@ -56,7 +58,7 @@ const MOCK_DB_APPOINTMENTS = [
     clientAvatar: null as string | null,
     serviceName: 'Beard Trim',
     startTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 14, 0).toISOString(),
-    endTime:   new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 14, 30).toISOString(),
+    endTime:   new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 14, 20).toISOString(),
     status: 'pending' as const,
     color: '#059669',
   },
@@ -86,12 +88,6 @@ function toScheduleEvents(
  * 80 vs the ~60 default gives readable 30-min slots.
  */
 const HOUR_ROW_HEIGHT = 80;
-
-/**
- * The static "now" line sits at 35% from the top of the calendar area.
- * On first load the calendar scrolls so the current time lands here.
- */
-const ANCHOR_RATIO = 0.35;
 
 // ─── Week day selector ────────────────────────────────────────────────────────
 
@@ -263,13 +259,36 @@ export default function BarberHomeScreen() {
   const [selectedDate, setSelectedDate]     = useState(new Date());
   const [breaks, setBreaks]                 = useState<ScheduleEvent[]>([]);
   const [showBreakModal, setShowBreakModal] = useState(false);
+  const [breakToDelete, setBreakToDelete]   = useState<ScheduleEvent | null>(null);
 
-  // ── Live clock (updates every minute for the "now" indicator label) ──────────
-  const [now, setNow] = useState(new Date());
+  // ── Now indicator (live clock) ────────────────────────────────────────────────
+  const [now, setNow]             = useState(new Date());
+  const scrollOffsetAnim          = useRef(new Animated.Value(0)).current;
+  const nowMinutesAnim            = useRef(
+    new Animated.Value(new Date().getHours() * 60 + new Date().getMinutes()),
+  ).current;
+
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 60_000);
-    return () => clearInterval(timer);
+    const id = setInterval(() => {
+      const d = new Date();
+      setNow(d);
+      nowMinutesAnim.setValue(d.getHours() * 60 + d.getMinutes());
+    }, 60_000);
+    return () => clearInterval(id);
   }, []);
+
+  // Animated top offset for the now-indicator overlay:
+  // position (px from timeline top) = (totalMinutes / 60) × HOUR_ROW_HEIGHT − scrollOffset
+  // useMemo prevents re-creating the derived node on every render;
+  // nowMinutesAnim and scrollOffsetAnim are stable useRef values.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const nowLineY = useMemo(
+    () => Animated.subtract(
+      Animated.multiply(nowMinutesAnim, HOUR_ROW_HEIGHT / 60),
+      scrollOffsetAnim,
+    ),
+    [],
+  );
 
   // ── Layout calculations ──────────────────────────────────────────────────────
   const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 84 : 62;
@@ -277,18 +296,13 @@ export default function BarberHomeScreen() {
   const WEEK_HEIGHT    = 72;
   const calendarHeight = screenHeight - insets.top - HEADER_HEIGHT - WEEK_HEIGHT - TAB_BAR_HEIGHT;
 
-  // Y-position (px) where the static "now" line is drawn
-  const ANCHOR_Y = calendarHeight * ANCHOR_RATIO;
-
-  // How many minutes of timeline correspond to ANCHOR_Y pixels from the top
-  const ANCHOR_MINUTES = (ANCHOR_Y / HOUR_ROW_HEIGHT) * 60;
-
-  // Initial scroll offset: aligns current time with the "now" line on first render.
-  // For non-today dates, scroll to 1 hour before open.
-  const nowMinutes      = now.getHours() * 60 + now.getMinutes();
-  const isViewingToday  = isSameDay(selectedDate, new Date());
-  const scrollMinutes   = isViewingToday
-    ? Math.max(0, nowMinutes - ANCHOR_MINUTES)
+  // Initial scroll offset: show ~1 hr of context before current time on today;
+  // for other dates start just before open hour.
+  const currentTime    = new Date();
+  const nowMinutes     = currentTime.getHours() * 60 + currentTime.getMinutes();
+  const isViewingToday = isSameDay(selectedDate, new Date());
+  const scrollMinutes  = isViewingToday
+    ? Math.max(0, nowMinutes - 60)
     : Math.max(0, OPEN_HOUR * 60 - 60);
 
   // Re-mounting BigCalendar on date change resets scroll to the correct position.
@@ -323,7 +337,7 @@ export default function BarberHomeScreen() {
       {/* ── Week strip ──────────────────────────────────────── */}
       <WeekDaySelector selectedDate={selectedDate} onSelect={setSelectedDate} />
 
-      {/* ── Timeline calendar + static now indicator ────────── */}
+      {/* ── Timeline calendar ───────────────────────────────── */}
       <View className="flex-1 bg-white">
         <BigCalendar<ScheduleEvent>
           key={calendarKey}
@@ -333,13 +347,20 @@ export default function BarberHomeScreen() {
           date={selectedDate}
           hourRowHeight={HOUR_ROW_HEIGHT}
           scrollOffsetMinutes={scrollMinutes}
-          hideNowIndicator   // we draw our own fixed-position indicator below
+          hideNowIndicator
           ampm={false}
           showTime
           swipeEnabled
           onSwipeEnd={setSelectedDate}
           headerContainerStyle={{ height: 0, overflow: 'hidden' }}
           bodyContainerStyle={{ backgroundColor: '#ffffff' }}
+          scrollViewProps={{
+            onScroll: Animated.event(
+              [{ nativeEvent: { contentOffset: { y: scrollOffsetAnim } } }],
+              { useNativeDriver: false },
+            ),
+            scrollEventThrottle: 16,
+          }}
           calendarCellStyle={(hour) => ({
             backgroundColor:
               hour < OPEN_HOUR || hour >= CLOSE_HOUR ? '#F9FAFB' : 'transparent',
@@ -351,7 +372,7 @@ export default function BarberHomeScreen() {
             // Duration-aware layout: compact horizontal row for ≤25 min slots
             const durationMinutes =
               (event.end.getTime() - event.start.getTime()) / 60_000;
-            const isCompact = durationMinutes <= 25;
+            const isCompact = durationMinutes <= 30;
 
             return (
               <TouchableOpacity
@@ -366,26 +387,35 @@ export default function BarberHomeScreen() {
                     overflow: 'hidden',
                   },
                 ]}
-                onPress={() =>
-                  event.eventType === 'appointment' &&
-                  Alert.alert(event.title, event.serviceName)
-                }
+                onPress={() => {
+                  if (event.eventType === 'appointment') {
+                    Alert.alert(event.title, event.serviceName);
+                  } else {
+                    setBreakToDelete(event);
+                  }
+                }}
               >
                 {isCompact ? (
-                  // ── Single-row layout for short (≤25 min) slots ──────────
-                  // Dynamic layout depending on runtime event duration — inline justified
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1 }}>
+                  // ── Compact layout for ≤30 min slots ─────────────────────
+                  <View style={{ flex: 1, justifyContent: 'center', gap: 1 }}>
+                    {/* Row 1: time */}
                     <Text
-                      style={{ fontSize: 9, fontWeight: '800', color: 'rgba(255,255,255,0.95)', flexShrink: 0 }}
+                      style={{ fontSize: 9, fontWeight: '800', color: 'rgba(255,255,255,0.95)', lineHeight: 11 }}
+                      numberOfLines={1}
                     >
                       {format(event.start, 'HH:mm')}
                     </Text>
-                    <Text
-                      style={{ fontSize: 10, fontWeight: '600', color: 'white', flexShrink: 1 }}
-                      numberOfLines={1}
-                    >
-                      · {event.eventType === 'appointment' ? event.title : 'Break'}
-                    </Text>
+                    {/* Row 2: name (+ service for appointments) — only when tall enough */}
+                    {durationMinutes > 15 && (
+                      <Text
+                        style={{ fontSize: 9, fontWeight: '600', color: 'white', lineHeight: 11 }}
+                        numberOfLines={1}
+                      >
+                        {event.eventType === 'appointment'
+                          ? `${event.title}${event.serviceName ? ` · ${event.serviceName}` : ''}`
+                          : 'Break'}
+                      </Text>
+                    )}
                   </View>
                 ) : (
                   // ── Stacked layout for normal / long slots ──────────────
@@ -416,63 +446,61 @@ export default function BarberHomeScreen() {
           }}
         />
 
-        {/*
-          Static "now" indicator — absolute overlay, always at ANCHOR_Y from the
-          top of the calendar area. pointerEvents="none" so all touches fall
-          through to BigCalendar beneath it.
-
-          ANCHOR_Y depends on calendarHeight (device-specific runtime value), and
-          the dot/label positions are pixel-precise against BigCalendar's internal
-          layout — both justified for inline styles per AGENTS.md.
-        */}
-        <View
-          pointerEvents="none"
-          style={{ position: 'absolute', top: ANCHOR_Y, left: 0, right: 0, zIndex: 10 }}
-        >
-          {/* Full-width red line */}
-          <View style={{ height: 2, backgroundColor: '#E53E3E' }} />
-
-          {/* Circle dot at the junction between the time-label column and events area */}
-          <View
+        {/* ── Now-indicator overlay (only on today's view) ──── */}
+        {isViewingToday && (
+          <Animated.View
+            pointerEvents="none"
             style={{
               position: 'absolute',
-              top: -4,
-              left: 54,
-              width: 10,
-              height: 10,
-              borderRadius: 5,
-              backgroundColor: '#E53E3E',
-            }}
-          />
-
-          {/*
-            Time label pill — overlays the BigCalendar time-label column.
-            Updates every minute via `now` state; BigCalendar does NOT re-mount.
-          */}
-          <View
-            style={{
-              position: 'absolute',
-              top: -11,
-              left: 2,
-              backgroundColor: '#E53E3E',
-              borderRadius: 4,
-              paddingHorizontal: 5,
-              paddingVertical: 2,
-              width: 46,
-              alignItems: 'center',
+              top:   nowLineY,
+              left:  0,
+              right: 0,
+              flexDirection:  'row',
+              alignItems:     'center',
+              zIndex: 10,
             }}
           >
-            <Text style={{ color: 'white', fontSize: 10, fontWeight: '700', letterSpacing: 0.3 }}>
+            {/* Time pill */}
+            <Text
+              style={{
+                fontSize:    9,
+                fontWeight:  '800',
+                color:       '#E53E3E',
+                paddingLeft: 4,
+                paddingRight: 2,
+                lineHeight:  11,
+              }}
+            >
               {format(now, 'HH:mm')}
             </Text>
-          </View>
-        </View>
+            {/* Circle dot */}
+            <View
+              style={{
+                width:           6,
+                height:          6,
+                borderRadius:    3,
+                backgroundColor: '#E53E3E',
+                marginRight:     2,
+              }}
+            />
+            {/* Horizontal line */}
+            <View
+              style={{
+                flex:            1,
+                height:          1.5,
+                backgroundColor: '#E53E3E',
+                opacity:         0.85,
+              }}
+            />
+          </Animated.View>
+        )}
+
       </View>
 
       {/* ── FAB ─────────────────────────────────────────────── */}
       <Pressable
         className="absolute right-5 w-14 h-14 rounded-full bg-accent items-center justify-center active:opacity-80"
-        style={[FAB_SHADOW, { bottom: TAB_BAR_HEIGHT + 16 }]}
+        style={[FAB_SHADOW, { bottom: TAB_BAR_HEIGHT + -50 }]}
         onPress={() => setShowBreakModal(true)}
       >
         <Plus size={26} color="white" />
@@ -483,6 +511,29 @@ export default function BarberHomeScreen() {
         visible={showBreakModal}
         onClose={() => setShowBreakModal(false)}
         onAdd={(breakEvent) => setBreaks((prev) => [...prev, breakEvent])}
+      />
+
+      {/* ── Remove-break confirmation ─────────────────────────── */}
+      <ConfirmModal
+        visible={breakToDelete !== null}
+        onClose={() => setBreakToDelete(null)}
+        onConfirm={() => {
+          if (breakToDelete) {
+            setBreaks((prev) =>
+              prev.filter((b) => b.start.getTime() !== breakToDelete.start.getTime()),
+            );
+          }
+          setBreakToDelete(null);
+        }}
+        title="Remove Break"
+        message={
+          breakToDelete
+            ? `Remove the ${format(breakToDelete.start, 'HH:mm')} break from your schedule?`
+            : ''
+        }
+        confirmLabel="Remove Break"
+        cancelLabel="Keep"
+        variant="warning"
       />
     </View>
   );
