@@ -1,13 +1,42 @@
 import { View, ActivityIndicator } from 'react-native';
+import { Redirect } from 'expo-router';
+import { useAuthStore } from '@/stores/authStore';
 
 /**
- * Root index screen — only visible for the brief moment while the AuthGate
- * in _layout.tsx runs its bootstrap check and calls router.replace().
+ * Root index — declarative redirect hub.
+ * Shows a spinner while auth bootstrap is in progress, then redirects
+ * based on token + role. Using <Redirect> (not router.replace) is
+ * timing-safe: Expo Router resolves it after the navigation container
+ * is ready, avoiding the "Unmatched route" race condition.
  */
 export default function Index() {
-  return (
-    <View className="flex-1 items-center justify-center bg-white">
-      <ActivityIndicator size="large" color="#fdb276" />
-    </View>
-  );
+  const { token, user, role, isLoading } = useAuthStore();
+
+  if (isLoading) {
+    return (
+      <View className="flex-1 items-center justify-center bg-white">
+        <ActivityIndicator size="large" color="#fdb276" />
+      </View>
+    );
+  }
+
+  if (!token) {
+    return <Redirect href="/(auth)/login" />;
+  }
+
+  if (role === 'client') {
+    return <Redirect href="/(client)/(tabs)" />;
+  }
+
+  if (role === 'barber') {
+    // If the barber has not completed onboarding, send them there first
+    const onboardingComplete = (user as any)?.onboardingComplete as boolean | undefined;
+    if (onboardingComplete) {
+      return <Redirect href="/(barber)/(tabs)" />;
+    }
+    return <Redirect href="/(barber)/onboarding/barber-type" />;
+  }
+
+  // staff_barber and unknown roles — fall back to login
+  return <Redirect href="/(auth)/login" />;
 }

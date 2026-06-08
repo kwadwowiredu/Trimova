@@ -21,13 +21,51 @@ function signToken(userId: string, role: UserRole, email: string): string {
 
 function formatUser(user: Record<string, unknown>) {
   return {
-    id: user.id,
-    email: user.email,
-    fullName: user.full_name,
-    phone: user.phone,
-    role: user.role,
+    id:        user.id,
+    email:     user.email,
+    fullName:  user.full_name,
+    phone:     user.phone,
+    role:      user.role,
     avatarUrl: user.avatar_url,
     createdAt: user.created_at,
+  };
+}
+
+/**
+ * For barbers, join barber_profiles so callers always receive
+ * onboardingComplete (and other profile fields).
+ * For non-barbers, returns the base user shape unchanged.
+ */
+async function enrichUser(
+  user: Record<string, unknown>,
+  supabase: ReturnType<typeof import('../utils/supabase').getSupabase>,
+) {
+  const base = formatUser(user);
+  if (user.role !== 'barber') return base;
+
+  const { data: p } = await supabase
+    .from('barber_profiles')
+    .select(
+      'barber_type, business_name, bio, onboarding_complete, ' +
+      'is_available, is_verified, rating, review_count, ' +
+      'service_radius_km, location_address, portfolio_images',
+    )
+    .eq('user_id', user.id as string)
+    .maybeSingle() as { data: Record<string, unknown> | null };
+
+  return {
+    ...base,
+    barberType:         p?.barber_type          ?? null,
+    businessName:       p?.business_name         ?? null,
+    bio:                p?.bio                   ?? null,
+    onboardingComplete: p?.onboarding_complete   ?? false,
+    isAvailable:        p?.is_available          ?? true,
+    isVerified:         p?.is_verified           ?? false,
+    rating:             parseFloat(String(p?.rating)) || 0,
+    reviewCount:        p?.review_count          || 0,
+    serviceRadius:      p?.service_radius_km     ?? null,
+    locationAddress:    p?.location_address      ?? null,
+    portfolioImages:    p?.portfolio_images       || [],
   };
 }
 
@@ -89,7 +127,7 @@ export const authController = {
     }
 
     const token = signToken(user.id, user.role, user.email);
-    sendSuccess(res, { token, user: formatUser(user) }, 'Account created successfully.', 201);
+    sendSuccess(res, { token, user: await enrichUser(user, supabase) }, 'Account created successfully.', 201);
   },
 
   async login(req: Request, res: Response) {
@@ -126,7 +164,7 @@ export const authController = {
     }
 
     const token = signToken(user.id, user.role, user.email);
-    sendSuccess(res, { token, user: formatUser(user) }, 'Logged in successfully.');
+    sendSuccess(res, { token, user: await enrichUser(user, supabase) }, 'Logged in successfully.');
   },
 
   async getMe(req: Request, res: Response) {
@@ -144,7 +182,7 @@ export const authController = {
       return;
     }
 
-    sendSuccess(res, formatUser(user));
+    sendSuccess(res, await enrichUser(user, supabase));
   },
 
   async googleAuth(req: Request, res: Response) {
@@ -217,7 +255,7 @@ export const authController = {
 
     const token = signToken(user.id, user.role, user.email);
     const isNewUser = !user.role || user.role === 'client';
-    sendSuccess(res, { token, user: formatUser(user), requiresRoleSelection: isNewUser });
+    sendSuccess(res, { token, user: await enrichUser(user, supabase), requiresRoleSelection: isNewUser });
   },
 
   async appleAuth(req: Request, res: Response) {
@@ -281,7 +319,7 @@ export const authController = {
     }
 
     const token = signToken(user.id, user.role, user.email);
-    sendSuccess(res, { token, user: formatUser(user) });
+    sendSuccess(res, { token, user: await enrichUser(user, supabase) });
   },
 
   async forgotPassword(req: Request, res: Response) {
@@ -373,6 +411,6 @@ export const authController = {
     }
 
     const token = signToken(user.id, user.role, user.email);
-    sendSuccess(res, { token, user: formatUser(user) }, 'Role updated successfully.');
+    sendSuccess(res, { token, user: await enrichUser(user, supabase) }, 'Role updated successfully.');
   },
 };

@@ -262,7 +262,7 @@ export default function LoginScreen() {
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
-                className={`bg-neutral-100 rounded-full px-5 py-4 text-sm text-neutral-800 border ${
+                className={`bg-neutral-100 rounded-full px-5 py-4 text-md text-neutral-800 border ${
                   errors.email ? 'border-danger' : 'border-transparent'
                 }`}
               />
@@ -287,7 +287,7 @@ export default function LoginScreen() {
                   placeholder="Enter your password"
                   placeholderTextColor="#A0AEC0"
                   secureTextEntry={!showPassword}
-                  className="flex-1 py-4 text-sm text-neutral-800"
+                  className="flex-1 py-4 text-md text-neutral-800"
                 />
                 <Pressable
                   onPress={() => setShowPassword((v) => !v)}

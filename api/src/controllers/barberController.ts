@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { getSupabase } from '../utils/supabase';
 import { sendSuccess, sendPaginated, sendError } from '../utils/response';
 
+
 // Raw row shape returned by the search_nearby_barbers SQL function
 interface RawBarberRow {
   id: string;
@@ -42,6 +43,139 @@ function mapListItem(row: RawBarberRow) {
 }
 
 export const barberController = {
+  /** PUT /api/barbers/me/business — create / update barber business details */
+  async updateBusinessDetails(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.sub;
+      const { barberType, businessName, bio, phone } = req.body as {
+        barberType: string;
+        businessName: string;
+        bio?: string;
+        phone?: string;
+      };
+
+      if (!barberType || !businessName?.trim()) {
+        return sendError(res, 'barberType and businessName are required.', 400);
+      }
+
+      const supabase = getSupabase();
+
+      // Upsert the barber profile row
+      const { error: profileError } = await supabase
+        .from('barber_profiles')
+        .upsert(
+          {
+            user_id: userId,
+            barber_type: barberType,
+            business_name: businessName.trim(),
+            bio: bio ?? null,
+            onboarding_complete: true,
+          },
+          { onConflict: 'user_id' },
+        );
+
+      if (profileError) throw profileError;
+
+      // Update phone on the users table if provided
+      if (phone) {
+        const { error: userError } = await supabase
+          .from('users')
+          .update({ phone: phone.trim() })
+          .eq('id', userId);
+        if (userError) throw userError;
+      }
+
+      // Return fresh user + profile
+      const { data: userData, error: userFetchError } = await supabase
+        .from('users')
+        .select('id, email, full_name, avatar_url, phone, role, created_at')
+        .eq('id', userId)
+        .single();
+
+      const { data: profileData } = await supabase
+        .from('barber_profiles')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+      if (userFetchError || !userData) throw userFetchError;
+
+      sendSuccess(res, {
+        id:                 userData.id,
+        email:              userData.email,
+        fullName:           userData.full_name,
+        avatarUrl:          userData.avatar_url,
+        phone:              userData.phone,
+        role:               userData.role,
+        createdAt:          userData.created_at,
+        barberType:         profileData?.barber_type,
+        businessName:       profileData?.business_name,
+        bio:                profileData?.bio,
+        isVerified:         profileData?.is_verified ?? false,
+        isAvailable:        profileData?.is_available ?? true,
+        onboardingComplete: profileData?.onboarding_complete ?? true,
+        rating:             parseFloat(String(profileData?.rating)) || 0,
+        reviewCount:        profileData?.review_count || 0,
+        serviceRadius:      profileData?.service_radius_km,
+        locationAddress:    profileData?.location_address,
+        portfolioImages:    profileData?.portfolio_images || [],
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  /** PUT /api/barbers/me/location — set / update barber location */
+  async updateLocation(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.sub;
+      const { lat, lng, address, serviceRadius } = req.body as {
+        lat: number;
+        lng: number;
+        address: string;
+        serviceRadius?: number;
+      };
+
+      if (lat == null || lng == null) {
+        return sendError(res, 'lat and lng are required.', 400);
+      }
+
+      const supabase = getSupabase();
+
+      // Build update payload — use PostGIS WKT for the geography column
+      const updatePayload: Record<string, unknown> = {
+        lat,
+        lng,
+        location_address: address,
+      };
+      if (serviceRadius != null) updatePayload.service_radius_km = serviceRadius;
+
+      // Attempt to set the PostGIS geography column via ST_Point
+      // Falls back gracefully if the column doesn't support direct text cast
+      try {
+        await supabase.rpc('set_barber_location', {
+          p_user_id: userId,
+          p_lat:     lat,
+          p_lng:     lng,
+        });
+      } catch {
+        // RPC not defined yet — lat/lng columns are enough for the search function
+      }
+
+      const { error } = await supabase
+        .from('barber_profiles')
+        .update(updatePayload)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+
+      sendSuccess(res, { message: 'Location updated.' });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+
   async search(req: Request, res: Response, next: NextFunction) {
     try {
       const {

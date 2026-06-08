@@ -21,6 +21,47 @@ You are an expert React Native + Expo engineer building a production-quality mar
 
 **Region & Currency:** Ghana. All prices in GHS (Ghana Cedis). All location services restricted to Ghana.
 
+--------------- BARBERSHOP SYSTEM ---------------- 
+A. Home - build a modern, high performance daily timeline schedule /hourly time or agenda view calendar just like the screenshot added.  Do not build this from scratch, use a highly optimised open source UI library for this. 
+
+Our database needs to store bookings with explicit start and end timestamps so the timeline can calculate the block heights. 
+
+-A horizontal day selector at the top
+
+-A vertical scrolling timeline from "6am" to "12am" as default but the time should change in accordance with how the user sets his schedule time management. 
+
+-Render a stylized appt card(eg. "10:00 - 10:45 | Kwadwo Yiadom | Haircut & Beard") spanning the correct time slots. 
+
+Provide mock appointment data structure matching standard ISO timestamp that could easily be replaced by our database fetch. 
+
+-Unavailability striping: You should block out hours when the barbershop is closed or when a specific barber is on break. 
+
+-Floating quick actions: implement that bottom right floating action button (+) to allow barbers to quickly set up break times in between their schedule onto the calendar grid. 
+
+B. Appointments - Act as an expert React Native and Expo developer. Write a production-ready Bookings Management Screen UI component optimized for mobile view layouts. The styling must be clean, elegant, and match a modern premium marketplace aesthetic. 
+
+UI Components Required:
+
+-Segmented Tabs: A clean, horizontal tab selector containing three filter options: "Upcoming", "Completed", and "Cancelled". The "Upcoming" tab must include a stylized red numerical notification badge showing the item count. The active tab should have a sharp under-line indicator.
+
+-Appointment Card: A container card with a subtle drop shadow and white background displaying:
+
+*Client profile picture (circular avatar image).
+
+*Client Name ("Kwame Mensah") and the requested service subtext ("Executive Fade & Beard Trim").
+
+*A prominent, rounded status badge ("Confirmed") with a high-contrast warm background.
+
+*Appointment details row utilizing vector icon markers for Date/Time ("Today, 2:00 PM") and Location coordinates ("East Legon, Accra").
+
+*A full-width, clean outline secondary button at the bottom labeled "Cancel Appointment".
+
+-Add a mockup booking card that can be replaced with a database query or even deleted.
+
+-The Tab Indicator: Ensure the underlying indicator line animates smoothly using Animated or react-native-reanimated when switching between Upcoming, Completed, and Cancelled.
+
+-Component Modularity: Build the individual booking card as its own separate component file (e.g., BookingCard.tsx) inside your components folder so you can loop over it easily using a standard React Native FlatList.
+
 ---
 
 ## 1. Tech Stack
@@ -379,6 +420,7 @@ Every screen must follow consistent visual rules. When building a screen, match 
 - Selected state (time slots, services): primary colour background `bg-accent` with white text `text-white`.
 - Unselected state: `bg-neutral-100 text-neutral-600`.
 - Focus state on inputs: `border-accent` (blue border).
+- For any default in app modal asking the user to confirm an action, replace it with a "custom made in app modal" that suits that action/request.
 
 ---
 

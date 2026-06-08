@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { useMutation } from '@tanstack/react-query';
+import { UserRound, Scissors } from 'lucide-react-native';
 import { authService } from '@/services/auth';
 import { useAuthStore } from '@/stores/authStore';
 import { getApiErrorMessage } from '@/services/api';
@@ -11,23 +12,23 @@ type RoleOption = {
   role: UserRole;
   label: string;
   subtitle: string;
-  emoji: string;
+  Icon: React.ComponentType<{ size: number; color: string }>;
   description: string;
 };
 
 const ROLE_OPTIONS: RoleOption[] = [
   {
     role: 'client',
-    label: 'I\'m a Client',
+    label: "I'm a Client",
     subtitle: 'Looking for a barber',
-    emoji: '💈',
+    Icon: UserRound,
     description: 'Search for barbers, book appointments, and pay online.',
   },
   {
     role: 'barber',
-    label: 'I\'m a Barber',
+    label: "I'm a Barber",
     subtitle: 'Offering haircut services',
-    emoji: '✂️',
+    Icon: Scissors,
     description: 'Set up your barbershop or mobile barber profile, manage bookings, and earn.',
   },
 ];
@@ -41,8 +42,12 @@ export default function RoleSelectionScreen() {
     onSuccess: async (res) => {
       const { token, user } = res.data.data;
       await setAuth(token, user);
-      if (user.role === 'client') router.replace('/(client)/(tabs)');
-      else router.replace('/(barber)/(tabs)');
+      if (user.role === 'client') {
+        router.replace('/(client)/(tabs)');
+      } else {
+        // New barber — always start onboarding flow
+        router.replace('/(barber)/onboarding/barber-type');
+      }
     },
     onError: (err) => {
       Alert.alert('Error', getApiErrorMessage(err));
@@ -76,7 +81,7 @@ export default function RoleSelectionScreen() {
             >
               <View className="flex-row items-center gap-4">
                 <View className={`w-14 h-14 rounded-2xl items-center justify-center ${isSelected ? 'bg-primary' : 'bg-neutral-100'}`}>
-                  <Text className="text-3xl">{option.emoji}</Text>
+                  <option.Icon size={28} color={isSelected ? '#ffffff' : '#4A5568'} />
                 </View>
                 <View className="flex-1">
                   <Text className={`text-base font-bold ${isSelected ? 'text-primary-lighter' : 'text-neutral-800'}`}>
