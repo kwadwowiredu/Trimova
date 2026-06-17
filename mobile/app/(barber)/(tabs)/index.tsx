@@ -1,10 +1,9 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   Pressable,
   Modal,
-  Animated,
   useWindowDimensions,
   Platform,
   TouchableOpacity,
@@ -14,7 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar as BigCalendar, type ICalendarEventBase } from 'react-native-big-calendar';
 import { format, addDays, startOfWeek, isSameDay } from 'date-fns';
-import { Bell, Plus, X, Clock } from 'lucide-react-native';
+import { Bell, Plus, X, Clock, Info } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import type { BarberProfile } from '@/types/user';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
@@ -27,7 +26,7 @@ interface ScheduleEvent extends ICalendarEventBase {
   eventType: 'appointment' | 'break';
 }
 
-// ─── Mock data (ISO timestamps — replace with useQuery when API is ready) ─────
+// ─── Mock data (replace with useQuery when API is ready) ─────────────────────
 
 const TODAY = new Date();
 
@@ -81,12 +80,9 @@ function toScheduleEvents(
   ];
 }
 
-// ─── Calendar layout constants ────────────────────────────────────────────────
+// ─── Calendar layout constant ─────────────────────────────────────────────────
 
-/**
- * Height (px) of each 1-hour row in the timeline.
- * 80 vs the ~60 default gives readable 30-min slots.
- */
+/** Height (px) of each 1-hour row in the timeline. */
 const HOUR_ROW_HEIGHT = 80;
 
 // ─── Week day selector ────────────────────────────────────────────────────────
@@ -134,9 +130,230 @@ function WeekDaySelector({
   );
 }
 
-// ─── Break modal ──────────────────────────────────────────────────────────────
+// ─── NowHourLabel ─────────────────────────────────────────────────────────────
+// A module-level component with its OWN clock state. This is the only way to
+// put a live time label next to BigCalendar's native now-indicator line:
+// HourGuideColumn is memoised with `() => true` so it never re-renders from
+// its parent — but a child component that manages its own state CAN re-render
+// independently of the memo barrier.
+//
+// BigCalendar renders it as:
+//   <View style={{ height: cellHeight }}>   ← 80 px outer container
+//     <NowHourLabel hour={hour} ampm={ampm} />
+//   </View>
+//
+// For non-current hours we mimic the default label.
+// For the current hour we overlay the live "HH:mm" text at the exact
+// minute-fractional pixel position, aligned with the native red line.
 
+function NowHourLabel({ hour }: { hour: number; ampm: boolean }) {
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    // Re-render every 30 s — fine-grained enough for a clock label
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const isCurrentHour = now.getHours() === hour;
+
+  // Pixel offset of the current minute within this hour's 80 px cell.
+  // Mirrors BigCalendar's own getRelativeTopInDay formula:
+  //   relativeTop% × totalHeight = (minutesFromStart / totalMinutes) × totalHeight
+  // Within one hour cell: (minutes / 60) × HOUR_ROW_HEIGHT
+  const minuteOffset = (now.getMinutes() / 60) * HOUR_ROW_HEIGHT;
+
+  if (!isCurrentHour) {
+    // Default hour label — matches BigCalendar's own formatHour(hour, false)
+    return (
+      <Text
+        style={{
+          fontSize:     10,
+          color:        '#A0AEC0',
+          textAlign:    'right',
+          paddingRight: 4,
+          paddingTop:   2,
+        }}
+      >
+        {`${hour}:00`}
+      </Text>
+    );
+  }
+
+  return (
+    <View>
+      {/*
+        Transparent placeholder keeps the column width identical to a normal
+        hour label so layout doesn't shift when we switch to the live label.
+      */}
+      <Text
+        style={{
+          fontSize:     10,
+          color:        'transparent',
+          paddingRight: 4,
+          paddingTop:   2,
+        }}
+      >
+        {`${hour}:00`}
+      </Text>
+
+      {/*
+        Live "HH:mm" label, absolutely positioned at the current minute mark.
+        Math.max(0, ...) prevents it from going above the cell top when
+        minutes = 0 and the label height (≈10 px) would push it negative.
+      */}
+      <View
+        style={{
+          position: 'absolute',
+          right:    4,
+          top:      Math.max(0, minuteOffset - 7),
+        }}
+      >
+        <Text
+          style={{
+            fontSize:   9,
+            fontWeight: '800',
+            color:      '#E53E3E',
+            textAlign:  'right',
+          }}
+        >
+          {format(now, 'HH:mm')}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+// ─── Wheel picker column ──────────────────────────────────────────────────────
+
+const WHEEL_ITEM_H  = 46;
+const WHEEL_VISIBLE = 5; // must be odd — centre row = selected
+
+const HOURS_12       = ['1','2','3','4','5','6','7','8','9','10','11','12'];
+const MINUTES_5      = ['00','05','10','15','20','25','30','35','40','45','50','55'];
+const MERIDIEM       = ['AM','PM'];
 const BREAK_DURATIONS = [15, 30, 45, 60, 90];
+
+interface WheelColumnProps {
+  items:         string[];
+  selectedIndex: number;
+  onChange:      (index: number) => void;
+  /** Fixed pixel width — omit to fill parent flex space. */
+  width?:        number;
+}
+
+function WheelColumn({ items, selectedIndex, onChange, width }: WheelColumnProps) {
+  const ref            = useRef<ScrollView>(null);
+  const pad            = Math.floor(WHEEL_VISIBLE / 2); // items above / below centre
+  // hasMomentumRef tracks whether a momentum phase is in progress.
+  // When the user makes a fast swipe, the sequence is:
+  //   onScrollBeginDrag → onMomentumScrollBegin → onMomentumScrollEnd
+  // For a slow drag (no fling), it's just:
+  //   onScrollBeginDrag → onScrollEndDrag
+  //
+  // Bug that was here before: snapTo() called both scrollTo({animated:true}) AND
+  // onChange(). The animated scroll fires onMomentumScrollEnd when it settles —
+  // so if the user starts a new drag before the old animation finishes, the old
+  // onMomentumScrollEnd fires last with a stale offset, overriding the new pick.
+  // Fix: never call scrollTo() from scroll callbacks; only call onChange().
+  const hasMomentumRef = useRef(false);
+
+  // Scroll to the initial selected position after layout (no animation —
+  // avoids triggering any momentum callbacks on mount).
+  useEffect(() => {
+    const id = setTimeout(() => {
+      ref.current?.scrollTo({ y: selectedIndex * WHEEL_ITEM_H, animated: false });
+    }, 0);
+    return () => clearTimeout(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <View style={{ width, height: WHEEL_ITEM_H * WHEEL_VISIBLE, overflow: 'hidden' }}>
+      {/* Highlight band behind the centre (selected) row */}
+      <View
+        pointerEvents="none"
+        style={{
+          position:        'absolute',
+          top:             pad * WHEEL_ITEM_H,
+          left:            4,
+          right:           4,
+          height:          WHEEL_ITEM_H,
+          backgroundColor: 'rgba(60,60,185,0.08)',
+          borderRadius:    10,
+        }}
+      />
+
+      <ScrollView
+        ref={ref}
+        showsVerticalScrollIndicator={false}
+        snapToInterval={WHEEL_ITEM_H}
+        decelerationRate="fast"
+        contentContainerStyle={{ paddingVertical: pad * WHEEL_ITEM_H }}
+        onScrollBeginDrag={() => {
+          hasMomentumRef.current = false;
+        }}
+        onMomentumScrollBegin={() => {
+          hasMomentumRef.current = true;
+        }}
+        onScrollEndDrag={(e) => {
+          // Only handle slow drags (no momentum). If momentum is starting,
+          // onMomentumScrollEnd will handle it — don't double-fire.
+          if (!hasMomentumRef.current) {
+            const clamped = Math.max(
+              0,
+              Math.min(
+                items.length - 1,
+                Math.round(e.nativeEvent.contentOffset.y / WHEEL_ITEM_H),
+              ),
+            );
+            onChange(clamped);
+          }
+        }}
+        onMomentumScrollEnd={(e) => {
+          hasMomentumRef.current = false;
+          const clamped = Math.max(
+            0,
+            Math.min(
+              items.length - 1,
+              Math.round(e.nativeEvent.contentOffset.y / WHEEL_ITEM_H),
+            ),
+          );
+          onChange(clamped);
+        }}
+      >
+        {items.map((label, i) => {
+          const isSelected = i === selectedIndex;
+          return (
+            <Pressable
+              key={i}
+              style={{ height: WHEEL_ITEM_H, alignItems: 'center', justifyContent: 'center' }}
+              onPress={() => {
+                // Tap on an item — scroll directly and notify parent.
+                // We call scrollTo here (not from a scroll callback) so there
+                // is no risk of the stale-animation feedback loop.
+                ref.current?.scrollTo({ y: i * WHEEL_ITEM_H, animated: true });
+                onChange(i);
+              }}
+            >
+              <Text
+                style={{
+                  fontSize:   isSelected ? 22 : 17,
+                  fontWeight: isSelected ? '700' : '400',
+                  color:      isSelected ? '#1A202C' : '#A0AEC0',
+                }}
+              >
+                {label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+// ─── Break modal ──────────────────────────────────────────────────────────────
 
 function BreakModal({
   visible,
@@ -145,23 +362,25 @@ function BreakModal({
 }: {
   visible: boolean;
   onClose: () => void;
-  onAdd: (breakEvent: ScheduleEvent) => void;
+  onAdd:   (breakEvent: ScheduleEvent) => void;
 }) {
-  const [startHour, setStartHour] = useState(13);
-  const [duration, setDuration]   = useState(30);
+  // Default: 1:00 PM
+  const [hourIdx,     setHourIdx]     = useState(0); // HOURS_12[0] = '1'
+  const [minIdx,      setMinIdx]      = useState(0); // MINUTES_5[0] = '00'
+  const [meridiemIdx, setMeridiemIdx] = useState(1); // MERIDIEM[1]  = 'PM'
+  const [duration,    setDuration]    = useState(30);
 
   function handleAdd() {
-    const today = new Date();
-    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate(), startHour, 0);
-    const end   = new Date(start.getTime() + duration * 60 * 1000);
-    onAdd({
-      title:       'Break',
-      start,
-      end,
-      color:       '#9CA3AF',
-      serviceName: '',
-      eventType:   'break',
-    });
+    const hour12 = hourIdx + 1; // 1–12
+    const hour24 =
+      meridiemIdx === 1            // PM
+        ? hour12 === 12 ? 12 : hour12 + 12
+        : hour12 === 12 ? 0  : hour12; // AM
+    const minute = minIdx * 5;
+    const today  = new Date();
+    const start  = new Date(today.getFullYear(), today.getMonth(), today.getDate(), hour24, minute);
+    const end    = new Date(start.getTime() + duration * 60_000);
+    onAdd({ title: 'Break', start, end, color: '#9CA3AF', serviceName: '', eventType: 'break' });
     onClose();
   }
 
@@ -170,37 +389,60 @@ function BreakModal({
       <Pressable className="absolute inset-0 bg-black/40" onPress={onClose} />
 
       <View className="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl pt-3 pb-10">
+        {/* Handle */}
         <View className="w-9 h-1 rounded-full bg-neutral-200 self-center mb-4" />
 
-        <View className="flex-row items-center justify-between px-5 mb-5">
+        {/* Header */}
+        <View className="flex-row items-center justify-between px-5 mb-4">
           <Text className="text-[17px] font-bold text-neutral-800">Add Break Time</Text>
           <Pressable onPress={onClose} hitSlop={12}>
             <X size={22} color="#4A5568" />
           </Pressable>
         </View>
 
-        <Text className="text-[11px] font-bold text-neutral-400 tracking-widest ml-5 mb-2.5 uppercase">
+        {/* Info banner */}
+        <View
+          className="mx-5 mb-5 rounded-2xl p-4 flex-row items-start gap-3"
+          style={{ backgroundColor: 'rgba(60,60,185,0.07)' }}
+        >
+          <Info size={16} color="#3c3cb9" style={{ marginTop: 1 }} />
+          <Text className="flex-1 text-sm text-accent leading-[20px]">
+            Setting a break prevents clients from booking you during this time window.
+          </Text>
+        </View>
+
+        {/* Start time label */}
+        <Text className="text-[11px] font-bold text-neutral-400 tracking-widest ml-5 mb-2 uppercase">
           Start time
         </Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          className="mb-5"
-          contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
-        >
-          {Array.from({ length: 17 }, (_, i) => i + 6).map((h) => (
-            <Pressable
-              key={h}
-              onPress={() => setStartHour(h)}
-              className={`px-3.5 py-2 rounded-full ${startHour === h ? 'bg-accent' : 'bg-neutral-100'}`}
-            >
-              <Text className={`text-sm font-semibold ${startHour === h ? 'text-white' : 'text-neutral-500'}`}>
-                {h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h - 12}pm`}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
 
+        {/* Wheel picker — hours : minutes  AM/PM */}
+        <View className="flex-row items-center px-5 mb-5">
+          <View className="flex-1">
+            <WheelColumn items={HOURS_12} selectedIndex={hourIdx} onChange={setHourIdx} />
+          </View>
+          <Text
+            style={{
+              fontSize: 26, fontWeight: '300',
+              color: '#CBD5E0', paddingBottom: 4,
+              marginHorizontal: 4,
+            }}
+          >
+            :
+          </Text>
+          <View className="flex-1">
+            <WheelColumn items={MINUTES_5} selectedIndex={minIdx} onChange={setMinIdx} />
+          </View>
+          <View style={{ width: 12 }} />
+          <WheelColumn
+            items={MERIDIEM}
+            selectedIndex={meridiemIdx}
+            onChange={setMeridiemIdx}
+            width={58}
+          />
+        </View>
+
+        {/* Duration */}
         <Text className="text-[11px] font-bold text-neutral-400 tracking-widest ml-5 mb-2.5 uppercase">
           Duration
         </Text>
@@ -209,9 +451,13 @@ function BreakModal({
             <Pressable
               key={d}
               onPress={() => setDuration(d)}
-              className={`flex-1 py-2.5 rounded-2xl items-center ${duration === d ? 'bg-accent' : 'bg-neutral-100'}`}
+              className={`flex-1 py-2.5 rounded-2xl items-center ${
+                duration === d ? 'bg-accent' : 'bg-neutral-100'
+              }`}
             >
-              <Text className={`text-sm font-bold ${duration === d ? 'text-white' : 'text-neutral-500'}`}>
+              <Text
+                className={`text-sm font-bold ${duration === d ? 'text-white' : 'text-neutral-500'}`}
+              >
                 {d >= 60 ? `${d / 60}h` : `${d}m`}
               </Text>
             </Pressable>
@@ -236,9 +482,9 @@ const OPEN_HOUR  = 10;
 const CLOSE_HOUR = 19;
 
 /**
- * FAB shadow — plain const (not StyleSheet.create) because:
- * - Coloured shadowColor (#3c3cb9) cannot be expressed as a Tailwind class
- * - Android `elevation` cannot be expressed as a Tailwind class
+ * FAB shadow — plain style object (not StyleSheet.create) because:
+ * - Coloured shadowColor (#3c3cb9) can't be expressed as a Tailwind class
+ * - Android `elevation` can't be expressed as a Tailwind class
  */
 const FAB_SHADOW = {
   shadowColor:   '#3c3cb9',
@@ -246,6 +492,14 @@ const FAB_SHADOW = {
   shadowOpacity: 0.4,
   shadowRadius:  10,
   elevation:     10,
+};
+
+// ─── BigCalendar theme ────────────────────────────────────────────────────────
+// deepMerge is applied by Calendar internally, so partial overrides are safe.
+const CALENDAR_THEME = {
+  palette: {
+    nowIndicator: '#E53E3E', // red line to match brand danger colour
+  },
 };
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
@@ -261,43 +515,14 @@ export default function BarberHomeScreen() {
   const [showBreakModal, setShowBreakModal] = useState(false);
   const [breakToDelete, setBreakToDelete]   = useState<ScheduleEvent | null>(null);
 
-  // ── Now indicator (live clock) ────────────────────────────────────────────────
-  const [now, setNow]             = useState(new Date());
-  const scrollOffsetAnim          = useRef(new Animated.Value(0)).current;
-  const nowMinutesAnim            = useRef(
-    new Animated.Value(new Date().getHours() * 60 + new Date().getMinutes()),
-  ).current;
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      const d = new Date();
-      setNow(d);
-      nowMinutesAnim.setValue(d.getHours() * 60 + d.getMinutes());
-    }, 60_000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Animated top offset for the now-indicator overlay:
-  // position (px from timeline top) = (totalMinutes / 60) × HOUR_ROW_HEIGHT − scrollOffset
-  // useMemo prevents re-creating the derived node on every render;
-  // nowMinutesAnim and scrollOffsetAnim are stable useRef values.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const nowLineY = useMemo(
-    () => Animated.subtract(
-      Animated.multiply(nowMinutesAnim, HOUR_ROW_HEIGHT / 60),
-      scrollOffsetAnim,
-    ),
-    [],
-  );
-
   // ── Layout calculations ──────────────────────────────────────────────────────
   const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 84 : 62;
   const HEADER_HEIGHT  = 90;
   const WEEK_HEIGHT    = 72;
   const calendarHeight = screenHeight - insets.top - HEADER_HEIGHT - WEEK_HEIGHT - TAB_BAR_HEIGHT;
 
-  // Initial scroll offset: show ~1 hr of context before current time on today;
-  // for other dates start just before open hour.
+  // Initial scroll: show ~1 hr of context before current time on today;
+  // for other dates start just before opening hour.
   const currentTime    = new Date();
   const nowMinutes     = currentTime.getHours() * 60 + currentTime.getMinutes();
   const isViewingToday = isSameDay(selectedDate, new Date());
@@ -305,8 +530,7 @@ export default function BarberHomeScreen() {
     ? Math.max(0, nowMinutes - 60)
     : Math.max(0, OPEN_HOUR * 60 - 60);
 
-  // Re-mounting BigCalendar on date change resets scroll to the correct position.
-  // We do NOT re-mount every minute (that would reset user-scroll state).
+  // Re-mounting BigCalendar on date change resets the scroll position correctly.
   const calendarKey = selectedDate.toDateString();
 
   const events       = toScheduleEvents(MOCK_DB_APPOINTMENTS, breaks);
@@ -347,31 +571,57 @@ export default function BarberHomeScreen() {
           date={selectedDate}
           hourRowHeight={HOUR_ROW_HEIGHT}
           scrollOffsetMinutes={scrollMinutes}
-          hideNowIndicator
           ampm={false}
           showTime
           swipeEnabled
           onSwipeEnd={setSelectedDate}
+          theme={CALENDAR_THEME}
+          /*
+            hourComponent replaces BigCalendar's default "10:00" label in the
+            left-hand hour guide column. NowHourLabel has its own interval so
+            it updates every 30 s regardless of the memo(() => true) barrier on
+            HourGuideColumn. Only the current-hour cell shows the live "HH:mm"
+            label; all other cells render their normal grey "H:00" text.
+          */
+          hourComponent={NowHourLabel}
           headerContainerStyle={{ height: 0, overflow: 'hidden' }}
           bodyContainerStyle={{ backgroundColor: '#ffffff' }}
-          scrollViewProps={{
-            onScroll: Animated.event(
-              [{ nativeEvent: { contentOffset: { y: scrollOffsetAnim } } }],
-              { useNativeDriver: false },
-            ),
-            scrollEventThrottle: 16,
-          }}
-          calendarCellStyle={(hour) => ({
+          calendarCellStyle={(date) => ({
             backgroundColor:
-              hour < OPEN_HOUR || hour >= CLOSE_HOUR ? '#F9FAFB' : 'transparent',
+              date && (date.getHours() < OPEN_HOUR || date.getHours() >= CLOSE_HOUR)
+                ? '#F9FAFB'
+                : 'transparent',
           })}
-          renderEvent={(event, touchableOpacityProps) => {
-            // Extract `key` from the spread so React doesn't warn about key-in-spread
-            const { key, ...restProps } = touchableOpacityProps;
+          /*
+            onPressEvent is the KEY fix for break taps.
 
-            // Duration-aware layout: compact horizontal row for ≤25 min slots
+            BigCalendar's useCalendarTouchableOpacityProps sets:
+              disabled: !onPressEvent || !!event.disabled
+
+            Without this prop, disabled = true for EVERY event, so no press
+            ever fires — not even the custom onPress we inject in renderEvent.
+            Providing onPressEvent flips disabled to false, restoring press
+            handling for all events. renderEvent's TouchableOpacity then
+            receives disabled: false via the {...restProps} spread and fires
+            normally.
+          */
+          onPressEvent={(event) => {
+            if (event.eventType === 'break') {
+              setBreakToDelete(event);
+            } else {
+              Alert.alert(event.title, event.serviceName);
+            }
+          }}
+          renderEvent={(event, touchableOpacityProps) => {
+            // Destructure `key` so React doesn't warn about key-in-spread
+            const { key, ...restProps } = touchableOpacityProps;
+            // restProps now carries: disabled=false, onPress=()=>onPressEvent(event)
+            // We do NOT override onPress — the default calls our onPressEvent above.
+
             const durationMinutes =
               (event.end.getTime() - event.start.getTime()) / 60_000;
+
+            // ≤30 min: compact single-row layout to fit the tight slot height
             const isCompact = durationMinutes <= 30;
 
             return (
@@ -382,49 +632,39 @@ export default function BarberHomeScreen() {
                   restProps.style,
                   {
                     backgroundColor: event.color,
-                    borderRadius: 7,
-                    padding: isCompact ? 4 : 6,
-                    overflow: 'hidden',
+                    borderRadius:    7,
+                    padding:         isCompact ? 4 : 6,
+                    overflow:        'hidden',
                   },
                 ]}
-                onPress={() => {
-                  if (event.eventType === 'appointment') {
-                    Alert.alert(event.title, event.serviceName);
-                  } else {
-                    setBreakToDelete(event);
-                  }
-                }}
               >
                 {isCompact ? (
-                  // ── Compact layout for ≤30 min slots ─────────────────────
-                  <View style={{ flex: 1, justifyContent: 'center', gap: 1 }}>
-                    {/* Row 1: time */}
+                  // ── Compact: single row for ≤30 min slots ─────────────────
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                     <Text
-                      style={{ fontSize: 9, fontWeight: '800', color: 'rgba(255,255,255,0.95)', lineHeight: 11 }}
+                      style={{ fontSize: 9, fontWeight: '800', color: 'rgba(255,255,255,0.95)' }}
                       numberOfLines={1}
                     >
                       {format(event.start, 'HH:mm')}
                     </Text>
-                    {/* Row 2: name (+ service for appointments) — only when tall enough */}
-                    {durationMinutes > 15 && (
-                      <Text
-                        style={{ fontSize: 9, fontWeight: '600', color: 'white', lineHeight: 11 }}
-                        numberOfLines={1}
-                      >
-                        {event.eventType === 'appointment'
-                          ? `${event.title}${event.serviceName ? ` · ${event.serviceName}` : ''}`
-                          : 'Break'}
-                      </Text>
-                    )}
+                    <Text
+                      style={{ fontSize: 9, fontWeight: '600', color: 'rgba(255,255,255,0.85)', flex: 1 }}
+                      numberOfLines={1}
+                    >
+                      {event.eventType === 'appointment'
+                        ? `${event.title}${event.serviceName ? ` · ${event.serviceName}` : ''}`
+                        : 'Break · Tap to remove'}
+                    </Text>
                   </View>
                 ) : (
-                  // ── Stacked layout for normal / long slots ──────────────
+                  // ── Stacked: normal / long slots ───────────────────────────
                   <>
                     <Text
                       style={{ fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.95)', lineHeight: 13 }}
                     >
                       {format(event.start, 'HH:mm')} – {format(event.end, 'HH:mm')}
                     </Text>
+
                     {event.eventType === 'appointment' ? (
                       <>
                         <Text style={{ fontSize: 11, fontWeight: '600', color: 'white', marginTop: 2 }}>
@@ -435,9 +675,14 @@ export default function BarberHomeScreen() {
                         </Text>
                       </>
                     ) : (
-                      <Text style={{ fontSize: 11, fontWeight: '600', color: 'white', marginTop: 2 }}>
-                        Break
-                      </Text>
+                      <>
+                        <Text style={{ fontSize: 11, fontWeight: '600', color: 'white', marginTop: 2 }}>
+                          Break
+                        </Text>
+                        <Text style={{ fontSize: 9, color: 'rgba(255,255,255,0.75)', marginTop: 2 }}>
+                          Tap to remove
+                        </Text>
+                      </>
                     )}
                   </>
                 )}
@@ -445,62 +690,12 @@ export default function BarberHomeScreen() {
             );
           }}
         />
-
-        {/* ── Now-indicator overlay (only on today's view) ──── */}
-        {isViewingToday && (
-          <Animated.View
-            pointerEvents="none"
-            style={{
-              position: 'absolute',
-              top:   nowLineY,
-              left:  0,
-              right: 0,
-              flexDirection:  'row',
-              alignItems:     'center',
-              zIndex: 10,
-            }}
-          >
-            {/* Time pill */}
-            <Text
-              style={{
-                fontSize:    9,
-                fontWeight:  '800',
-                color:       '#E53E3E',
-                paddingLeft: 4,
-                paddingRight: 2,
-                lineHeight:  11,
-              }}
-            >
-              {format(now, 'HH:mm')}
-            </Text>
-            {/* Circle dot */}
-            <View
-              style={{
-                width:           6,
-                height:          6,
-                borderRadius:    3,
-                backgroundColor: '#E53E3E',
-                marginRight:     2,
-              }}
-            />
-            {/* Horizontal line */}
-            <View
-              style={{
-                flex:            1,
-                height:          1.5,
-                backgroundColor: '#E53E3E',
-                opacity:         0.85,
-              }}
-            />
-          </Animated.View>
-        )}
-
       </View>
 
       {/* ── FAB ─────────────────────────────────────────────── */}
       <Pressable
         className="absolute right-5 w-14 h-14 rounded-full bg-accent items-center justify-center active:opacity-80"
-        style={[FAB_SHADOW, { bottom: TAB_BAR_HEIGHT + -50 }]}
+        style={[FAB_SHADOW, { bottom: TAB_BAR_HEIGHT - 50 }]}
         onPress={() => setShowBreakModal(true)}
       >
         <Plus size={26} color="white" />

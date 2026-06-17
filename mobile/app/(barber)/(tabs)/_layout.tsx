@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import { Tabs } from 'expo-router';
-import { Calendar, CalendarCheck, Users, User } from 'lucide-react-native';
+import { HomeIcon, CalendarCheck, Users, User } from 'lucide-react-native';
 
 export default function BarberTabsLayout() {
   return (
@@ -27,7 +27,7 @@ export default function BarberTabsLayout() {
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) => <Calendar size={22} color={color} />,
+          tabBarIcon: ({ color }) => <HomeIcon   size={22} color={color} />,
         }}
       />
       <Tabs.Screen

@@ -509,7 +509,7 @@ export default function BarberBookingsScreen() {
 
   return (
     // paddingTop is a runtime insets value — must stay inline
-    <View className="flex-1 bg-neutral-100" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-white" style={{ paddingTop: insets.top }}>
 
       {/* ── Header ──────────────────────────────────────────── */}
       <View className="flex-row items-center justify-between px-5 py-3 bg-white border-b border-neutral-100">
@@ -558,10 +558,11 @@ export default function BarberBookingsScreen() {
           const pageBookings = filterBookings(bookings, tab);
           return (
             // Each page is exactly one screen wide — pagingEnabled requires this
-            <View key={tab} style={{ width }}>
+            <View key={tab} style={{ width, backgroundColor: '#F5F6F8' }}>
               <FlatList
                 data={pageBookings}
                 keyExtractor={(item) => item.id}
+                style={{ backgroundColor: '#F5F6F8' }}
                 contentContainerStyle={{
                   paddingTop: 12,
                   paddingBottom: isSelectionMode ? 100 : 32,
