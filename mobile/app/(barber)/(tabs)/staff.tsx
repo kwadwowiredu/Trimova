@@ -414,21 +414,35 @@ export default function BarberStaffScreen() {
   }
 
   return (
-    <View className="flex-1 bg-white" style={{ paddingTop: insets.top }}>
-      {/* ── Header ─────────────────────────────────────────── */}
-      <View className="flex-row items-center justify-between px-5 py-4 border-b border-neutral-100">
-        <View className="flex-1 mr-3">
-          <Text className="text-2xl font-bold text-neutral-800">
-            Staff Management
-          </Text>
-          <Text className="text-sm text-neutral-500 mt-0.5">
-            Manage your team and track performance.
-          </Text>
+    <View className="flex-1 bg-white">
+      {/* ── Purple decorative header ─────────────────────────── */}
+      <View
+        style={{
+          backgroundColor: '#2D27A8',
+          paddingTop:       insets.top,
+          overflow:         'hidden',
+        }}
+      >
+        {/* decorative blobs */}
+        <View style={{ position: 'absolute', width: 260, height: 260, borderRadius: 130,
+          backgroundColor: '#7B5BC4', opacity: 0.5, top: -80, right: -40 }} />
+        <View style={{ position: 'absolute', width: 180, height: 180, borderRadius: 90,
+          backgroundColor: '#C084FC', opacity: 0.22, bottom: -40, left: -20 }} />
+
+        <View className="flex-row items-center justify-between px-5 pt-3 pb-5">
+          <View className="flex-1 mr-3">
+            <Text style={{ fontSize: 26, fontWeight: '800', color: '#ffffff' }}>
+              Staff Management
+            </Text>
+            <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', marginTop: 2 }}>
+              Manage your team and track performance.
+            </Text>
+          </View>
+          <Pressable className="relative p-1" hitSlop={10}>
+            <Bell size={22} color="rgba(255,255,255,0.9)" />
+            <View className="absolute top-1 right-1 w-2 h-2 rounded-full bg-danger border-2 border-white" />
+          </Pressable>
         </View>
-        <Pressable className="relative p-1" hitSlop={10}>
-          <Bell size={22} color="#4A5568" />
-          <View className="absolute top-1 right-1 w-2 h-2 rounded-full bg-danger border-2 border-white" />
-        </Pressable>
       </View>
 
       {/* ── Scrollable content ─────────────────────────────── */}

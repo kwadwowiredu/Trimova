@@ -14,14 +14,39 @@ You are an expert React Native + Expo engineer building a production-quality mar
 
 **Who uses it:**
 - **Clients** — Search for barbers, book and pay for appointments, confirm service completion, leave reviews.
+-When a client books from a barbershop, the appt automatically becomes confirmed, unless the barber decides to cancel the appt. 
+-When a clients books from a mobile barber, he first makes a request, then if the request is granted by the barber, he goes ahead to make payment. Trimova holds the payment until appt is completed. 
 - **Barbershop Owners** — Set up their shop, manage staff barbers, manage services/pricing/hours, receive payouts.
 - **Mobile/Freelance Barbers** — Set up their base location and service radius, accept/decline out-of-radius requests, receive payouts.
-- **Staff Barbers** — Log in with owner-generated credentials(email), view their own bookings and stats, manage their own availability.
+- **Staff Barbers** — They cannot access the app as an employee unless they are invited.
+- Log in with owner-generated credentials(email), view their own bookings and stats, manage their own availability.
+Barbers can use the same account to operate in two shops. You should not make them create two different accounts with two different email addresses.
+The Barber's Identity: A barber’s profile (portfolio, reviews, ratings) belongs to them, not the shop. If they move shops, they should not lose their hard-earned 5-star rating.
+Calendar Clashes: If a barber works at Shop A from 9:00 AM to 2:00 PM, they cannot be booked at Shop B at 1:00 PM. With one account, your system can see their entire schedule and prevent double-booking.
+- In the database, do not hardcode a shop_id directly inside the Barbers table. Instead, use a join table (a relationship table) called Shop_Staff:
+User Table: id, name, email, rating, etc.
+Shop Table: id, shop_name, location, etc.
+Shop_Staff Table (The Link): id, user_id, shop_id, role (e.g., Master Barber), status (Active/Away)
+This allows one user_id to be linked to multiple shop_ids.
+- When a barber opens their app, give them a Shop Switcher dropdown or menu at the top of their screen.If they select Shop A, the app fetches and displays Shop A’s schedule and earnings.If they select Shop B, the screen updates to show Shop B's data.
+- The Sign-Up Flow:
+To make this work seamlessly, your app's entry point should look like this:
+1. The Owner / Freelancer Route: They download the app, click "Sign Up", and create their shop profile from scratch.2. The Employee Route: They cannot just click "Sign Up". Instead, the process starts from the owner's side:
+- Step 1: - The Owner goes to the Staff Management screen  and types in the barber's phone number, email to send an invite.
+- Step 2: The backend creates a "pending" account for that barber and sends them an email with a unique download link.Step 3: The barber downloads the app via that link. The app recognizes the link, lets them set a password, and logs them directly into that shop.
+
+Now, when Shop B wants to hire a staff barber already having an account, eg.created via Shop A's invite, they don't need a new sign-up link. Here is how that flows behind the scenes:
+- Shop B sends the invite: The owner of Shop B goes to their Staff Management screen and types in the barber's existing phone number, email.
+- The System Checks: Your database looks up the email and says, "Oh, this barber already exists in our system (linked to Shop A).
+- "The Notification: Instead of forcing them to download the app again, the system sends an in-app notification to the barber’s phone: eg."Kingston Barbershop (Shop B) has invited you to join their staff.
+- "The Acceptance: Once the barber clicks "Accept," your database creates that second link (Shop_Staff row), and the barber instantly gains the ability to switch between Shop A and Shop B inside their app. The switch between accounts feature will be added in the profile screen.
 - **Admins** — Monitor the platform, manage users, handle financials and refunds, moderate reviews (separate Next.js web app, not part of this React Native project).
 
 **Region & Currency:** Ghana. All prices in GHS (Ghana Cedis). All location services restricted to Ghana.
+-Clients are notified that the app holds payment until their appts with their barbers are completed. If appts doesn't happen, clients receive a refund. 
+-In cases of cancellation, clients have to cancel appts hours early before their appt, else they may receive partial refund.
 
---------------- BARBERSHOP SYSTEM ---------------- 
+## --------------- BARBERSHOP SYSTEM ---------------- 
 A. Home - build a modern, high performance daily timeline schedule /hourly time or agenda view calendar just like the screenshot added.  Do not build this from scratch, use a highly optimised open source UI library for this. 
 
 Our database needs to store bookings with explicit start and end timestamps so the timeline can calculate the block heights. 
@@ -61,6 +86,19 @@ UI Components Required:
 -The Tab Indicator: Ensure the underlying indicator line animates smoothly using Animated or react-native-reanimated when switching between Upcoming, Completed, and Cancelled.
 
 -Component Modularity: Build the individual booking card as its own separate component file (e.g., BookingCard.tsx) inside your components folder so you can loop over it easily using a standard React Native FlatList.
+
+- Loyalty program in Barbershop/Mobile barber system: 
+1. Flash Promos (Time-Based)
+How it works: Barbers can launch quick, temporary discounts (e.g., 20% off for Christmas or a slow Tuesday) on specific services or their entire menu.
+The Goal: Urgently fills empty booking slots during slow periods and drives immediate transaction volume through the client app.
+
+2. Custom Stamp Cards (Goal-Based)How it works: Barbers decide how many app bookings a client must complete (e.g., 5 or 8 cuts) to unlock a custom reward, which can be a massive discount or a 100% free appointment.
+The Goal: Completely stops cash-bypass. Clients will actively refuse to pay the barber outside the app because they do not want to lose progress on their digital loyalty stamps.
+For custom stamps promos, the app doesn't charge a commission on that particular appt where the client reaches the said target activated by the barber.
+- The barber choose which services earn stamps and which services can be redeemed as rewards.
+- The barber can check [X] Standard Haircut, but leave [ ] Beard Trim unchecked. A client only gets a stamp if they buy an eligible service.
+- "What is the reward?": If the reward is a free appt, the barber selects which specific service is free (e.g., "Free Standard Haircut only")
+
 
 ---
 

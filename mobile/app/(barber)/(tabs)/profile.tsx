@@ -22,6 +22,10 @@ import {
   ChevronRight,
   MapPin,
   LogOut,
+  Calendar,
+  CreditCard,
+  Settings2,
+  Archive,
 } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import type { BarberProfile } from '@/types/user';
@@ -205,39 +209,18 @@ export default function BarberProfileScreen() {
             </View>
           )}
 
-          {/* White content card
-              Pulled up by AVATAR_TOTAL/2 so the avatar straddles the cover/card boundary.
-              The avatar sits at y=0 within this card; its top half is visually "above"
-              the card's own top edge and renders over the cover (higher z-order). */}
+          {/* White content card — sits immediately below cover (no negative margin).
+              Avatar is absolutely positioned at the cover/card boundary instead. */}
           <View
             className="bg-white items-center pb-6"
             style={{
-              marginTop:          -(AVATAR_TOTAL / 2),
               borderTopLeftRadius:  28,
               borderTopRightRadius: 28,
+              paddingTop:           AVATAR_TOTAL / 2 + 16,
             }}
           >
-            {/* Avatar with white border ring */}
-            <View
-              style={{
-                width:           AVATAR_TOTAL,
-                height:          AVATAR_TOTAL,
-                borderRadius:    AVATAR_TOTAL / 2,
-                backgroundColor: '#ffffff',
-                alignItems:      'center',
-                justifyContent:  'center',
-                shadowColor:     '#1A202C',
-                shadowOffset:    { width: 0, height: 3 },
-                shadowOpacity:   0.14,
-                shadowRadius:    10,
-                elevation:       6,
-              }}
-            >
-              <ProfileAvatar />
-            </View>
-
             {/* Name */}
-            <Text className="text-2xl font-bold text-neutral-800 mt-4 text-center px-6">
+            <Text className="text-2xl font-bold text-neutral-800 text-center px-6">
               {user?.fullName ?? 'Barber Name'}
             </Text>
 
@@ -269,6 +252,37 @@ export default function BarberProfileScreen() {
               </View>
             )}
           </View>
+
+          {/* Avatar — absolutely positioned so its center sits exactly at the
+              cover/card boundary.  zIndex:20 ensures it renders above both. */}
+          <View
+            style={{
+              position:  'absolute',
+              top:       COVER_H - AVATAR_TOTAL / 2,
+              left:      0,
+              right:     0,
+              alignItems: 'center',
+              zIndex:    20,
+            }}
+          >
+            <View
+              style={{
+                width:           AVATAR_TOTAL,
+                height:          AVATAR_TOTAL,
+                borderRadius:    AVATAR_TOTAL / 2,
+                backgroundColor: '#ffffff',
+                alignItems:      'center',
+                justifyContent:  'center',
+                shadowColor:     '#1A202C',
+                shadowOffset:    { width: 0, height: 3 },
+                shadowOpacity:   0.16,
+                shadowRadius:    12,
+                elevation:       8,
+              }}
+            >
+              <ProfileAvatar />
+            </View>
+          </View>
         </View>
 
         {/* ── Section cards ─────────────────────────────────────── */}
@@ -280,25 +294,31 @@ export default function BarberProfileScreen() {
               icon={<User size={17} color="#3c3cb9" />}
               title="Personal Info"
               subtitle="Edit profile & social links"
-              onPress={() => {}}
+              onPress={() => router.push('/personal-info' as any)}
             />
             <MenuRow
               icon={<Building2 size={17} color="#3c3cb9" />}
               title="Business Details"
-              subtitle="Edit business details"
-              onPress={() => {}}
+              subtitle="Shop info, address & cover photo"
+              onPress={() => router.push('/business-details' as any)}
             />
             <MenuRow
               icon={<Layers size={17} color="#3c3cb9" />}
               title="Portfolio"
               subtitle="Showcase your work"
-              onPress={() => {}}
+              onPress={() => router.push('/portfolio' as any)}
             />
             <MenuRow
               icon={<Star size={17} color="#3c3cb9" />}
               title="Reviews & Ratings"
               subtitle="Client feedback & scores"
-              onPress={() => {}}
+              onPress={() => router.push('/reviews' as any)}
+            />
+            <MenuRow
+              icon={<CreditCard size={17} color="#3c3cb9" />}
+              title="Payout Method"
+              subtitle="Mobile Money & bank payouts"
+              onPress={() => router.push('/payout' as any)}
               isLast
             />
           </SectionCard>
@@ -309,19 +329,25 @@ export default function BarberProfileScreen() {
               icon={<Scissors size={17} color="#3c3cb9" />}
               title="Services"
               subtitle="Manage your services & pricing"
-              onPress={() => {}}
+              onPress={() => router.push('/services' as any)}
+            />
+            <MenuRow
+              icon={<Calendar size={17} color="#3c3cb9" />}
+              title="Schedule"
+              subtitle="Working hours & day availability"
+              onPress={() => router.push('/schedule' as any)}
             />
             <MenuRow
               icon={<BarChart3 size={17} color="#3c3cb9" />}
               title="Statistics"
               subtitle="Revenue, bookings & trends"
-              onPress={() => {}}
+              onPress={() => router.push('/statistics' as any)}
             />
             <MenuRow
-              icon={<Clock size={17} color="#3c3cb9" />}
+              icon={<Archive size={17} color="#3c3cb9" />}
               title="History"
               subtitle="Past appointments"
-              onPress={() => {}}
+              onPress={() => router.push('/history' as any)}
               isLast
             />
           </SectionCard>
@@ -331,8 +357,19 @@ export default function BarberProfileScreen() {
             <MenuRow
               icon={<Tag size={17} color="#3c3cb9" />}
               title="Loyalty Programs"
-              subtitle="Configure flash promotions and client digital stamp cards"
+              subtitle="Flash promotions & digital stamp cards"
               onPress={() => router.push('/loyalty' as any)}
+              isLast
+            />
+          </SectionCard>
+
+          {/* Preferences */}
+          <SectionCard label="Preferences">
+            <MenuRow
+              icon={<Settings2 size={17} color="#3c3cb9" />}
+              title="Settings"
+              subtitle="Appearance, notifications & security"
+              onPress={() => router.push('/settings' as any)}
               isLast
             />
           </SectionCard>

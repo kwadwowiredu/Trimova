@@ -538,24 +538,38 @@ export default function BarberHomeScreen() {
   const workingHours = `${OPEN_HOUR}:00 – ${CLOSE_HOUR}:00`;
 
   return (
-    <View className="flex-1 bg-white" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-white">
 
-      {/* ── Header ──────────────────────────────────────────── */}
-      <View className="flex-row items-center justify-between px-5 border-b border-neutral-100 h-[70]">
-        <View className="flex-1 mr-3">
-          <Text className="text-[17px] font-bold text-neutral-800" numberOfLines={1}>
-            {businessName}
-          </Text>
-          <Text className="text-xs text-neutral-500 mt-0.5">
-            {format(selectedDate, 'EEE, d MMM')}
-            {'  ·  '}
-            {workingHours}
-          </Text>
+      {/* ── Purple decorative header ─────────────────────────── */}
+      <View
+        style={{
+          backgroundColor: '#2D27A8',
+          paddingTop:       insets.top,
+          overflow:         'hidden',
+        }}
+      >
+        {/* decorative blobs */}
+        <View style={{ position: 'absolute', width: 260, height: 260, borderRadius: 130,
+          backgroundColor: '#7B5BC4', opacity: 0.5, top: -90, right: -40 }} />
+        <View style={{ position: 'absolute', width: 180, height: 180, borderRadius: 90,
+          backgroundColor: '#C084FC', opacity: 0.22, bottom: -40, left: -20 }} />
+
+        <View className="flex-row items-center justify-between px-5 h-[70]">
+          <View className="flex-1 mr-3">
+            <Text style={{ fontSize: 17, fontWeight: '700', color: '#ffffff' }} numberOfLines={1}>
+              {businessName}
+            </Text>
+            <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 2 }}>
+              {format(selectedDate, 'EEE, d MMM')}
+              {'  ·  '}
+              {workingHours}
+            </Text>
+          </View>
+          <Pressable className="relative p-1" hitSlop={10}>
+            <Bell size={22} color="rgba(255,255,255,0.9)" />
+            <View className="absolute top-1 right-1 w-2 h-2 rounded-full bg-danger border-2 border-white" />
+          </Pressable>
         </View>
-        <Pressable className="relative p-1" hitSlop={10}>
-          <Bell size={22} color="#4A5568" />
-          <View className="absolute top-1 right-1 w-2 h-2 rounded-full bg-danger border-2 border-white" />
-        </Pressable>
       </View>
 
       {/* ── Week strip ──────────────────────────────────────── */}

@@ -508,28 +508,42 @@ export default function BarberBookingsScreen() {
   const modalContent = modalConfig ? getModalContent(modalConfig) : null;
 
   return (
-    // paddingTop is a runtime insets value — must stay inline
-    <View className="flex-1 bg-white" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-white">
 
-      {/* ── Header ──────────────────────────────────────────── */}
-      <View className="flex-row items-center justify-between px-5 py-3 bg-white border-b border-neutral-100">
-        <Text className="text-[17px] font-bold text-neutral-800" numberOfLines={1}>
-          {barber?.businessName ?? 'My Barbershop'}
-        </Text>
-        <Pressable className="relative p-1">
-          <Bell size={22} color="#4A5568" />
-          {upcomingCount > 0 && (
-            <View className="absolute top-1 right-1 w-2 h-2 rounded-full bg-danger border-2 border-white" />
-          )}
-        </Pressable>
-      </View>
+      {/* ── Purple decorative header ─────────────────────────── */}
+      <View
+        style={{
+          backgroundColor: '#2D27A8',
+          paddingTop:       insets.top,
+          overflow:         'hidden',
+        }}
+      >
+        {/* decorative blobs */}
+        <View style={{ position: 'absolute', width: 280, height: 280, borderRadius: 140,
+          backgroundColor: '#7B5BC4', opacity: 0.5, top: -100, right: -50 }} />
+        <View style={{ position: 'absolute', width: 160, height: 160, borderRadius: 80,
+          backgroundColor: '#C084FC', opacity: 0.22, bottom: -30, left: -20 }} />
 
-      {/* ── Page title ────────────────────────────────────────── */}
-      <View className="px-5 pt-4 pb-3.5 bg-white">
-        <Text className="text-2xl font-bold text-neutral-800">Bookings</Text>
-        <Text className="text-sm text-neutral-500 mt-0.5">
-          Manage your schedule and requests.
-        </Text>
+        {/* Top row: shop name + bell */}
+        <View className="flex-row items-center justify-between px-5 pt-3">
+          <Text style={{ fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.7)' }} numberOfLines={1}>
+            {barber?.businessName ?? 'My Barbershop'}
+          </Text>
+          <Pressable className="relative p-1">
+            <Bell size={22} color="rgba(255,255,255,0.9)" />
+            {upcomingCount > 0 && (
+              <View className="absolute top-1 right-1 w-2 h-2 rounded-full bg-danger border-2 border-white" />
+            )}
+          </Pressable>
+        </View>
+
+        {/* Page title */}
+        <View className="px-5 pt-1 pb-5">
+          <Text style={{ fontSize: 26, fontWeight: '800', color: '#ffffff' }}>Bookings</Text>
+          <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', marginTop: 2 }}>
+            Manage your schedule and requests.
+          </Text>
+        </View>
       </View>
 
       {/* ── Tab bar ───────────────────────────────────────────── */}
