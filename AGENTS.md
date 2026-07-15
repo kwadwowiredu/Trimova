@@ -47,7 +47,7 @@ Now, when Shop B wants to hire a staff barber already having an account, eg.crea
 -In cases of cancellation, clients have to cancel appts hours early before their appt, else they may receive partial refund.
 
 ## --------------- BARBERSHOP SYSTEM ---------------- 
-A. Home - build a modern, high performance daily timeline schedule /hourly time or agenda view calendar just like the screenshot added.  Do not build this from scratch, use a highly optimised open source UI library for this. 
+A. ***HOME** - build a modern, high performance daily timeline schedule /hourly time or agenda view calendar just like the screenshot added.  Do not build this from scratch, use a highly optimised open source UI library for this. 
 
 Our database needs to store bookings with explicit start and end timestamps so the timeline can calculate the block heights. 
 
@@ -63,7 +63,7 @@ Provide mock appointment data structure matching standard ISO timestamp that cou
 
 -Floating quick actions: implement that bottom right floating action button (+) to allow barbers to quickly set up break times in between their schedule onto the calendar grid. 
 
-B. Appointments - Act as an expert React Native and Expo developer. Write a production-ready Bookings Management Screen UI component optimized for mobile view layouts. The styling must be clean, elegant, and match a modern premium marketplace aesthetic. 
+B. **Appointments** - Act as an expert React Native and Expo developer. Write a production-ready Bookings Management Screen UI component optimized for mobile view layouts. The styling must be clean, elegant, and match a modern premium marketplace aesthetic. 
 
 UI Components Required:
 
@@ -86,6 +86,13 @@ UI Components Required:
 -The Tab Indicator: Ensure the underlying indicator line animates smoothly using Animated or react-native-reanimated when switching between Upcoming, Completed, and Cancelled.
 
 -Component Modularity: Build the individual booking card as its own separate component file (e.g., BookingCard.tsx) inside your components folder so you can loop over it easily using a standard React Native FlatList.
+
+C. **STAFF** 
+
+D. **PROFILE**
+- make sure user data get permanently saved when they make changes/updates/edits to any section of this screen. 
+- A user isn't supposed to type in his own location in the search bar of the address field of the business details section. A places autocomplete api should suggest the name once the user starts typing in the location. 
+-
 
 - Loyalty program in Barbershop/Mobile barber system: 
 1. Flash Promos (Time-Based)
@@ -349,6 +356,11 @@ Uses `expo-apple-authentication`. The flow: user taps "Sign in with Apple" → n
 - **React Query manages all server state.** Use `useQuery` for reads, `useMutation` for writes. No manual loading/error state management for API calls.
 - **Zustand manages only client-side state** — auth session, GPS location, in-progress booking data, search filters. Never duplicate server data in Zustand.
 - **TypeScript everywhere.** Every component, hook, utility, and API function must be typed. No `any` types unless absolutely unavoidable.
+
+Follow these constraints:
+1. Do NOT use global destructive commands like `AsyncStorage.clear()`. 
+2. Explicitly remove or reset user-specific keys only: `user_token`, `profile_data`, `financial_stats`, and `active_workspace_id`.
+3. Retain global device configuration flags in local storage, specifically: `is_dark_mode` and `has_completed_onboarding`.
 
 ---
 

@@ -27,5 +27,30 @@ export const ITEMS_PER_PAGE = 20;
 
 export const DEBOUNCE_MS = 300;
 
-export const TOKEN_STORAGE_KEY = 'trimova_auth_token';
-export const ONBOARDING_SEEN_KEY = 'trimova_onboarding_seen';
+// ── Storage keys ─────────────────────────────────────────────────────────────
+// SecureStore (user-scoped, cleared on logout)
+export const TOKEN_STORAGE_KEY = 'user_token';
+
+// AsyncStorage — USER-SCOPED: wiped on logout / account deletion.
+export const PROFILE_CACHE_KEY    = 'profile_data';
+export const FINANCIAL_STATS_KEY  = 'financial_stats';
+export const ACTIVE_WORKSPACE_KEY = 'active_workspace_id';
+export const LOYALTY_PROGRESS_KEY = 'loyalty_progress';
+
+/** Every user-scoped AsyncStorage key. Logout removes exactly these — never AsyncStorage.clear(). */
+export const USER_SCOPED_KEYS = [
+  PROFILE_CACHE_KEY,
+  FINANCIAL_STATS_KEY,
+  ACTIVE_WORKSPACE_KEY,
+  LOYALTY_PROGRESS_KEY,
+] as const;
+
+// AsyncStorage — DEVICE-GLOBAL: RETAINED across logout (never cleared here).
+export const THEME_MODE_KEY            = 'is_dark_mode';
+export const ONBOARDING_SEEN_KEY       = 'has_completed_onboarding';
+export const PUSH_TOKEN_KEY            = 'push_token';
+export const LANGUAGE_KEY              = 'language';
+
+// Legacy keys kept only for one-time migration of existing installs.
+export const LEGACY_THEME_KEY      = 'trimova_theme_mode';
+export const LEGACY_ONBOARDING_KEY = 'trimova_onboarding_seen';

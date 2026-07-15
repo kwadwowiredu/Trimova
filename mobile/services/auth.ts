@@ -34,6 +34,9 @@ export const authService = {
   getMe: () =>
     api.get<ApiResponse<AuthResponse['user']>>('/auth/me'),
 
+  updateProfile: (payload: Record<string, unknown>) =>
+    api.patch<ApiResponse<AuthResponse['user']>>('/auth/me', payload),
+
   googleAuth: (idToken: string) =>
     api.post<ApiResponse<AuthResponse & { requiresRoleSelection?: boolean }>>('/auth/google', { idToken }),
 
@@ -42,4 +45,19 @@ export const authService = {
 
   updateRole: (role: UserRole) =>
     api.patch<ApiResponse<AuthResponse>>('/auth/role', { role }),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    api.post<ApiResponse<null>>('/auth/change-password', { currentPassword, newPassword }),
+
+  /** Confirm the current password (used before destructive flows like account deletion). */
+  verifyPassword: (password: string) =>
+    api.post<ApiResponse<{ valid: boolean }>>('/auth/verify-password', { password }),
+
+  /** Disassociate this device's push token from the user on the backend. */
+  logout: () =>
+    api.post<ApiResponse<null>>('/auth/logout'),
+
+  /** Permanently delete the account (and all owned data) from the database. */
+  deleteAccount: (password?: string) =>
+    api.delete<ApiResponse<null>>('/auth/me', { data: { password } }),
 };

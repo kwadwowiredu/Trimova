@@ -31,6 +31,8 @@ import {
 } from 'lucide-react-native';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { MOCK_STAFF, type StaffMember } from '@/app/(barber)/(tabs)/staff';
+import { useAuthStore } from '@/stores/authStore';
+import type { BarberProfile } from '@/types/user';
 
 // ─── Mock today's appointments ────────────────────────────────────────────────
 
@@ -736,8 +738,35 @@ export default function StaffDetailScreen() {
     ]).start();
   }
 
+  // The shop owner manages themselves through the same screen ("/staff/owner"),
+  // with Overview + Workspace only (Personal details are edited in Profile).
+  const { user } = useAuthStore();
+  const isOwner = id === 'owner';
+  const owner = user as (BarberProfile & { isBookable?: boolean }) | null;
+
+  const ownerMember: StaffMember | undefined = isOwner && owner
+    ? {
+        id: 'owner',
+        name: owner.fullName ?? 'You',
+        role: 'Owner · Barber',
+        rating: owner.rating && owner.rating > 0 ? owner.rating : 5.0,
+        avatarUrl: owner.avatarUrl ?? null,
+        isActive: true,
+        totalAppointments: 56,   // TODO: real owner analytics endpoint
+        revenueThisMonth: 1480,
+        phoneNumber: owner.phone ?? '',
+        email: owner.email ?? '',
+        joinedDate: owner.createdAt ?? new Date().toISOString(),
+        assignedServices: ['Haircut & Beard', 'Executive Fade', 'Skin Fade'],
+      }
+    : undefined;
+
   // In production: fetch from API using id
-  const member: StaffMember | undefined = MOCK_STAFF.find((m) => m.id === id);
+  const member: StaffMember | undefined = isOwner
+    ? ownerMember
+    : MOCK_STAFF.find((m) => m.id === id);
+
+  const visibleTabs: TabName[] = isOwner ? ['Overview', 'Workspace'] : TABS;
 
   if (!member) {
     return (
@@ -812,7 +841,7 @@ export default function StaffDetailScreen() {
 
       {/* ── Tab bar ────────────────────────────────────────── */}
       <View className="flex-row border-b border-neutral-100 bg-white">
-        {TABS.map((tab) => {
+        {visibleTabs.map((tab) => {
           const isActive = tab === activeTab;
           return (
             <Pressable
@@ -838,7 +867,7 @@ export default function StaffDetailScreen() {
       {/* ── Tab content ────────────────────────────────────── */}
       <View className="flex-1 bg-neutral-50">
         {activeTab === 'Overview' && <OverviewTab member={member} />}
-        {activeTab === 'Personal' && (
+        {activeTab === 'Personal' && !isOwner && (
           <PersonalTab
             member={member}
             onDelete={() => setShowDeleteConfirm(true)}

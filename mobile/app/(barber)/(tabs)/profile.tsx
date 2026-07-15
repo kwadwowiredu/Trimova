@@ -17,7 +17,6 @@ import {
   Star,
   Scissors,
   BarChart3,
-  Clock,
   Tag,
   ChevronRight,
   MapPin,
@@ -26,22 +25,38 @@ import {
   CreditCard,
   Settings2,
   Archive,
+  TrendingUp,
 } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
+import { useThemeColors, type ThemeColors } from '@/hooks/useThemeColors';
 import type { BarberProfile } from '@/types/user';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+
+// Mock analytics until the real endpoints exist.
+// Owner's monthly commission-tier progress (mirrors Platform Rewards).
+const TIER = { name: 'Silver' as 'Bronze' | 'Silver' | 'Gold', fee: '7%', cuts: 175, nextName: 'Gold', nextAt: 301, nextFee: '5%' };
+
+// Medal artwork + fill color per tier (assets: bronze.jpg / silver.jpg / gold.jpg).
+const TIER_ART: Record<'Bronze' | 'Silver' | 'Gold', { img: number; fill: string }> = {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  Bronze: { img: require('../../../assets/bronze.jpg'), fill: '#CD7F32' },
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  Silver: { img: require('../../../assets/silver.jpg'), fill: '#9BA3AF' },
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  Gold:   { img: require('../../../assets/gold.jpg'),   fill: '#D4A017' },
+};
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
 const AVATAR_SIZE   = 84;
-const AVATAR_BORDER = 5;    // white ring thickness
-const AVATAR_TOTAL  = AVATAR_SIZE + AVATAR_BORDER * 2; // 94 px
+const AVATAR_BORDER = 5;
+const AVATAR_TOTAL  = AVATAR_SIZE + AVATAR_BORDER * 2;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function SectionLabel({ children }: { children: string }) {
+function SectionLabel({ children, c }: { children: string; c: ThemeColors }) {
   return (
-    <Text className="text-[11px] font-bold text-neutral-400 tracking-widest uppercase mb-2 ml-1">
+    <Text style={{ fontSize: 11, fontWeight: '700', color: c.textFaint, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8 }}>
       {children}
     </Text>
   );
@@ -53,51 +68,36 @@ interface MenuRowProps {
   subtitle: string;
   onPress: () => void;
   isLast?: boolean;
+  c: ThemeColors;
 }
 
-function MenuRow({ icon, title, subtitle, onPress, isLast = false }: MenuRowProps) {
+function MenuRow({ icon, title, subtitle, onPress, isLast = false, c }: MenuRowProps) {
   return (
     <>
       <Pressable
         onPress={onPress}
-        className="flex-row items-center px-4 py-3.5 gap-3 active:bg-neutral-50"
+        style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 8 }}
+        className="active:opacity-70"
       >
-        <View className="w-9 h-9 rounded-xl bg-neutral-100 items-center justify-center">
+        <View style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }}>
           {icon}
         </View>
-        <View className="flex-1">
-          <Text className="text-[15px] font-semibold text-neutral-800">{title}</Text>
-          <Text className="text-xs text-neutral-500 mt-0.5">{subtitle}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 16, fontWeight: '600', color: c.text }}>{title}</Text>
+          <Text style={{ fontSize: 12, color: c.textMuted, marginTop: 1 }}>{subtitle}</Text>
         </View>
-        <ChevronRight size={16} color="#CBD5E0" />
+        <ChevronRight size={20} color={c.textFaint} />
       </Pressable>
-      {!isLast && <View className="h-px bg-neutral-100 mx-4" />}
+      {!isLast && <View style={{ height: 1, backgroundColor: c.border, marginLeft: 44 }} />}
     </>
   );
 }
 
-function SectionCard({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function SectionCard({ label, children, c }: { label: string; children: React.ReactNode; c: ThemeColors }) {
   return (
-    <View className="mb-4">
-      <SectionLabel>{label}</SectionLabel>
-      <View
-        className="bg-white rounded-2xl overflow-hidden"
-        style={{
-          borderWidth:   1,
-          borderColor:   '#E2E8F0',
-          shadowColor:   '#1A202C',
-          shadowOffset:  { width: 0, height: 1 },
-          shadowOpacity: 0.06,
-          shadowRadius:  4,
-          elevation:     2,
-        }}
-      >
+    <View style={{ marginBottom: 16 }}>
+      <SectionLabel c={c}>{label}</SectionLabel>
+      <View>
         {children}
       </View>
     </View>
@@ -108,12 +108,12 @@ function SectionCard({
 
 export default function BarberProfileScreen() {
   const insets                  = useSafeAreaInsets();
+  const c                       = useThemeColors();
   const { height: screenHeight } = useWindowDimensions();
   const { user, logout }        = useAuthStore();
   const barber                  = user as BarberProfile | null;
   const [showSignOut, setShowSignOut] = useState(false);
 
-  // Cover photo occupies the top ~22 % of usable screen height + safe-area top
   const COVER_H = Math.round(screenHeight * 0.22) + insets.top;
 
   const initials = (user?.fullName ?? 'B')
@@ -123,12 +123,11 @@ export default function BarberProfileScreen() {
     .join('')
     .toUpperCase();
 
-  function handleSignOut() {
-    logout();
+  async function handleSignOut() {
+    await logout();
     router.replace('/(auth)/login');
   }
 
-  // ── Inline avatar (uses accent blue, not the primary orange of Avatar.tsx) ──
   function ProfileAvatar() {
     if (user?.avatarUrl) {
       return (
@@ -142,17 +141,11 @@ export default function BarberProfileScreen() {
     return (
       <View
         style={{
-          width:           AVATAR_SIZE,
-          height:          AVATAR_SIZE,
-          borderRadius:    AVATAR_SIZE / 2,
-          backgroundColor: '#3c3cb9',
-          alignItems:      'center',
-          justifyContent:  'center',
+          width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2,
+          backgroundColor: c.accent, alignItems: 'center', justifyContent: 'center',
         }}
       >
-        <Text style={{ color: '#fff', fontSize: 30, fontWeight: '700' }}>
-          {initials}
-        </Text>
+        <Text style={{ color: '#fff', fontSize: 30, fontWeight: '700' }}>{initials}</Text>
       </View>
     );
   }
@@ -160,124 +153,85 @@ export default function BarberProfileScreen() {
   return (
     <>
       <ScrollView
-        className="flex-1 bg-neutral-50"
+        style={{ flex: 1, backgroundColor: c.bg }}
         contentContainerStyle={{ paddingBottom: 48 }}
         showsVerticalScrollIndicator={false}
       >
         {/* ── Cover photo + avatar + metadata ──────────────────── */}
         <View>
-          {/* Cover photo */}
           {barber?.coverPhotoUrl ? (
             <ImageBackground
               source={{ uri: barber.coverPhotoUrl }}
               style={{ height: COVER_H }}
               resizeMode="cover"
             >
-              {/* Subtle dark overlay for legibility */}
-              <View
-                style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.15)' }}
-              />
+              <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.15)' }} />
             </ImageBackground>
           ) : (
-            /* Placeholder — two-layer deep-purple-to-lavender blob */
             <View style={{ height: COVER_H, backgroundColor: '#2D27A8', overflow: 'hidden' }}>
-              {/* Large decorative blob — simulates the gradient orb from the screenshots */}
               <View
                 style={{
-                  position:        'absolute',
-                  width:           COVER_H * 1.8,
-                  height:          COVER_H * 1.8,
-                  borderRadius:    COVER_H,
-                  backgroundColor: '#7B5BC4',
-                  opacity:         0.55,
-                  top:             -COVER_H * 0.7,
-                  right:           -COVER_H * 0.3,
+                  position: 'absolute', width: COVER_H * 1.8, height: COVER_H * 1.8,
+                  borderRadius: COVER_H, backgroundColor: '#7B5BC4', opacity: 0.55,
+                  top: -COVER_H * 0.7, right: -COVER_H * 0.3,
                 }}
               />
               <View
                 style={{
-                  position:        'absolute',
-                  width:           COVER_H,
-                  height:          COVER_H,
-                  borderRadius:    COVER_H / 2,
-                  backgroundColor: '#C084FC',
-                  opacity:         0.25,
-                  bottom:          -COVER_H * 0.3,
-                  left:            -COVER_H * 0.1,
+                  position: 'absolute', width: COVER_H, height: COVER_H,
+                  borderRadius: COVER_H / 2, backgroundColor: '#C084FC', opacity: 0.25,
+                  bottom: -COVER_H * 0.3, left: -COVER_H * 0.1,
                 }}
               />
             </View>
           )}
 
-          {/* White content card — sits immediately below cover (no negative margin).
-              Avatar is absolutely positioned at the cover/card boundary instead. */}
+          {/* White content card */}
           <View
-            className="bg-white items-center pb-6"
             style={{
-              borderTopLeftRadius:  28,
-              borderTopRightRadius: 28,
-              paddingTop:           AVATAR_TOTAL / 2 + 16,
+              backgroundColor: c.surface, alignItems: 'center', paddingBottom: 24,
+              borderTopLeftRadius: 28, borderTopRightRadius: 28,
+              paddingTop: AVATAR_TOTAL / 2 + 16,
             }}
           >
-            {/* Name */}
-            <Text className="text-2xl font-bold text-neutral-800 text-center px-6">
+            <Text style={{ fontSize: 24, fontWeight: '700', color: c.text, textAlign: 'center', paddingHorizontal: 24 }}>
               {user?.fullName ?? 'Barber Name'}
             </Text>
 
-            {/* Shop name */}
             {barber?.businessName && (
-              <Text className="text-sm font-semibold text-neutral-500 mt-1 text-center">
+              <Text style={{ fontSize: 14, fontWeight: '600', color: c.textMuted, marginTop: 4, textAlign: 'center' }}>
                 {barber.businessName}
               </Text>
             )}
 
-            {/* Location */}
-            <View className="flex-row items-center gap-1.5 mt-2">
-              <MapPin size={13} color="#A0AEC0" />
-              <Text className="text-sm text-neutral-400">
-                {barber?.location?.address ?? 'East Legon, Accra'}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
+              <MapPin size={13} color={c.textFaint} />
+              <Text style={{ fontSize: 14, color: c.textFaint }}>
+                {barber?.location?.address ?? 'No location set'}
               </Text>
             </View>
 
-            {/* Rating pill */}
             {barber?.rating != null && barber.rating > 0 && (
-              <View className="flex-row items-center gap-1.5 mt-3 bg-neutral-100 px-3 py-1.5 rounded-full">
-                <Star size={12} color="#D69E2E" fill="#D69E2E" />
-                <Text className="text-xs font-bold text-neutral-700">
-                  {barber.rating.toFixed(1)}
-                </Text>
-                <Text className="text-xs text-neutral-500">
-                  ({barber.reviewCount ?? 0} reviews)
-                </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, backgroundColor: c.surfaceAlt, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999 }}>
+                <Star size={12} color={c.warning} fill={c.warning} />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: c.text }}>{barber.rating.toFixed(1)}</Text>
+                <Text style={{ fontSize: 12, color: c.textMuted }}>({barber.reviewCount ?? 0} reviews)</Text>
               </View>
             )}
           </View>
 
-          {/* Avatar — absolutely positioned so its center sits exactly at the
-              cover/card boundary.  zIndex:20 ensures it renders above both. */}
+          {/* Avatar */}
           <View
             style={{
-              position:  'absolute',
-              top:       COVER_H - AVATAR_TOTAL / 2,
-              left:      0,
-              right:     0,
-              alignItems: 'center',
-              zIndex:    20,
+              position: 'absolute', top: COVER_H - AVATAR_TOTAL / 2, left: 0, right: 0,
+              alignItems: 'center', zIndex: 20,
             }}
           >
             <View
               style={{
-                width:           AVATAR_TOTAL,
-                height:          AVATAR_TOTAL,
-                borderRadius:    AVATAR_TOTAL / 2,
-                backgroundColor: '#ffffff',
-                alignItems:      'center',
-                justifyContent:  'center',
-                shadowColor:     '#1A202C',
-                shadowOffset:    { width: 0, height: 3 },
-                shadowOpacity:   0.16,
-                shadowRadius:    12,
-                elevation:       8,
+                width: AVATAR_TOTAL, height: AVATAR_TOTAL, borderRadius: AVATAR_TOTAL / 2,
+                backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center',
+                shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.16, shadowRadius: 12, elevation: 8,
               }}
             >
               <ProfileAvatar />
@@ -286,119 +240,76 @@ export default function BarberProfileScreen() {
         </View>
 
         {/* ── Section cards ─────────────────────────────────────── */}
-        <View className="px-4 mt-5">
+        <View style={{ paddingHorizontal: 16, marginTop: 20 }}>
 
-          {/* Account */}
-          <SectionCard label="Account">
-            <MenuRow
-              icon={<User size={17} color="#3c3cb9" />}
-              title="Personal Info"
-              subtitle="Edit profile & social links"
-              onPress={() => router.push('/personal-info' as any)}
-            />
-            <MenuRow
-              icon={<Building2 size={17} color="#3c3cb9" />}
-              title="Business Details"
-              subtitle="Shop info, address & cover photo"
-              onPress={() => router.push('/business-details' as any)}
-            />
-            <MenuRow
-              icon={<Layers size={17} color="#3c3cb9" />}
-              title="Portfolio"
-              subtitle="Showcase your work"
-              onPress={() => router.push('/portfolio' as any)}
-            />
-            <MenuRow
-              icon={<Star size={17} color="#3c3cb9" />}
-              title="Reviews & Ratings"
-              subtitle="Client feedback & scores"
-              onPress={() => router.push('/reviews' as any)}
-            />
-            <MenuRow
-              icon={<CreditCard size={17} color="#3c3cb9" />}
-              title="Payout Method"
-              subtitle="Mobile Money & bank payouts"
-              onPress={() => router.push('/payout' as any)}
-              isLast
-            />
+          {/* Monthly tier progress summary → Platform Rewards */}
+          {(() => {
+            const toNext = Math.max(0, TIER.nextAt - TIER.cuts);
+            const pct = Math.min(1, TIER.cuts / TIER.nextAt);
+            const art = TIER_ART[TIER.name];
+            return (
+              <Pressable
+                onPress={() => router.push('/platform-rewards' as any)}
+                style={{ backgroundColor: c.surface, borderRadius: 18, borderWidth: 1, borderColor: c.border, padding: 16, marginBottom: 16 }}
+                className="active:opacity-80"
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  {/* Tier medal artwork */}
+                  <Image
+                    source={art.img}
+                    style={{ width: 44, height: 44, borderRadius: 22 }}
+                    resizeMode="cover"
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '800', color: c.text }}>{TIER.name} Tier · {TIER.fee} commission</Text>
+                    <Text style={{ fontSize: 12, color: c.textMuted, marginTop: 1 }}>Your monthly progress</Text>
+                  </View>
+                  <ChevronRight size={18} color={c.textFaint} />
+                </View>
+
+                {/* Progress bar filled in the tier's own color */}
+                <View style={{ height: 8, borderRadius: 999, backgroundColor: c.surfaceAlt, marginTop: 14, overflow: 'hidden' }}>
+                  <View style={{ width: `${pct * 100}%`, height: '100%', backgroundColor: art.fill, borderRadius: 999 }} />
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                  <TrendingUp size={13} color={art.fill} />
+                  <Text style={{ fontSize: 12, color: c.textMuted, flex: 1 }}>
+                    {toNext} more booking{toNext === 1 ? '' : 's'} to reach {TIER.nextName} ({TIER.nextFee} fee)
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })()}
+
+          <SectionCard label="Account" c={c}>
+            <MenuRow c={c} icon={<User size={20} color={c.textMuted} />} title="Personal Info" subtitle="Edit profile & social links" onPress={() => router.push('/personal-info' as any)} />
+            <MenuRow c={c} icon={<Building2 size={20} color={c.textMuted} />} title="Business Details" subtitle="Shop info, address & cover photo" onPress={() => router.push('/business-details' as any)} />
+            <MenuRow c={c} icon={<Layers size={20} color={c.textMuted} />} title="Portfolio" subtitle="Showcase your work" onPress={() => router.push('/portfolio' as any)} />
+            <MenuRow c={c} icon={<Star size={20} color={c.textMuted} />} title="Reviews & Ratings" subtitle="Client feedback & scores" onPress={() => router.push('/reviews' as any)} />
+            <MenuRow c={c} icon={<CreditCard size={20} color={c.textMuted} />} title="Payout Method" subtitle="Mobile Money & bank payouts" onPress={() => router.push('/payout' as any)} isLast />
           </SectionCard>
 
-          {/* Work */}
-          <SectionCard label="Work">
-            <MenuRow
-              icon={<Scissors size={17} color="#3c3cb9" />}
-              title="Services"
-              subtitle="Manage your services & pricing"
-              onPress={() => router.push('/services' as any)}
-            />
-            <MenuRow
-              icon={<Calendar size={17} color="#3c3cb9" />}
-              title="Schedule"
-              subtitle="Working hours & day availability"
-              onPress={() => router.push('/schedule' as any)}
-            />
-            <MenuRow
-              icon={<BarChart3 size={17} color="#3c3cb9" />}
-              title="Statistics"
-              subtitle="Revenue, bookings & trends"
-              onPress={() => router.push('/statistics' as any)}
-            />
-            <MenuRow
-              icon={<Archive size={17} color="#3c3cb9" />}
-              title="History"
-              subtitle="Past appointments"
-              onPress={() => router.push('/history' as any)}
-              isLast
-            />
+          <SectionCard label="Work" c={c}>
+            <MenuRow c={c} icon={<Scissors size={20} color={c.textMuted} />} title="Services" subtitle="Manage your services & pricing" onPress={() => router.push('/services' as any)} />
+            <MenuRow c={c} icon={<Calendar size={20} color={c.textMuted} />} title="Schedule" subtitle="Working hours & day availability" onPress={() => router.push('/schedule' as any)} />
+            <MenuRow c={c} icon={<BarChart3 size={20} color={c.textMuted} />} title="Statistics" subtitle="Revenue, bookings & trends" onPress={() => router.push('/statistics' as any)} />
+            <MenuRow c={c} icon={<Archive size={20} color={c.textMuted} />} title="History" subtitle="Past appointments" onPress={() => router.push('/history' as any)} isLast />
           </SectionCard>
 
-          {/* Marketing & Growth */}
-          <SectionCard label="Marketing & Growth">
-            <MenuRow
-              icon={<Tag size={17} color="#3c3cb9" />}
-              title="Loyalty Programs"
-              subtitle="Flash promotions & digital stamp cards"
-              onPress={() => router.push('/loyalty' as any)}
-              isLast
-            />
+          <SectionCard label="Marketing & Growth" c={c}>
+            <MenuRow c={c} icon={<Tag size={20} color={c.textMuted} />} title="Loyalty Programs" subtitle="Flash promotions & digital stamp cards" onPress={() => router.push('/loyalty' as any)} isLast />
           </SectionCard>
 
-          {/* Preferences */}
-          <SectionCard label="Preferences">
-            <MenuRow
-              icon={<Settings2 size={17} color="#3c3cb9" />}
-              title="Settings"
-              subtitle="Appearance, notifications & security"
-              onPress={() => router.push('/settings' as any)}
-              isLast
-            />
+          <SectionCard label="Preferences" c={c}>
+            <MenuRow c={c} icon={<Settings2 size={20} color={c.textMuted} />} title="Settings" subtitle="Appearance, notifications & security" onPress={() => router.push('/settings' as any)} isLast />
           </SectionCard>
 
-          {/* Sign out */}
-          <Pressable
-            onPress={() => setShowSignOut(true)}
-            className="flex-row items-center justify-center gap-2 bg-white rounded-2xl py-4 mb-5 active:opacity-70"
-            style={{
-              borderWidth:   1,
-              borderColor:   '#FED7D7',
-              shadowColor:   '#1A202C',
-              shadowOffset:  { width: 0, height: 1 },
-              shadowOpacity: 0.04,
-              shadowRadius:  4,
-              elevation:     1,
-            }}
-          >
-            <LogOut size={16} color="#E53E3E" />
-            <Text className="text-sm font-bold text-danger">Sign Out</Text>
-          </Pressable>
-
-          <Text className="text-center text-xs text-neutral-300 pb-2">
+          <Text style={{ textAlign: 'center', fontSize: 12, color: c.textFaint, paddingBottom: 8 }}>
             Trimova v1.0.0
           </Text>
         </View>
       </ScrollView>
 
-      {/* Sign-out confirmation */}
       <ConfirmModal
         visible={showSignOut}
         onClose={() => setShowSignOut(false)}

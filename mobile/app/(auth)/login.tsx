@@ -9,19 +9,17 @@ import {
   Platform,
   ActivityIndicator,
   KeyboardAvoidingView,
-  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useMutation } from '@tanstack/react-query';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import { Eye, EyeOff } from 'lucide-react-native';
+import { Eye, EyeOff, Check } from 'lucide-react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { authService } from '@/services/auth';
 import { useAuthStore } from '@/stores/authStore';
-import { isValidEmail, isValidPassword } from '@/utils/validators';
-import { getApiErrorMessage } from '@/services/api';
+import { isValidEmail, isValidPassword, meetsAllPasswordRules } from '@/utils/validators';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -34,6 +32,7 @@ export default function LoginScreen() {
   const [fullName, setFullName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [serverError, setServerError] = useState('');
 
   const { setAuth } = useAuthStore();
 
@@ -48,10 +47,15 @@ export default function LoginScreen() {
     onSuccess: async (res) => {
       const { token, user } = res.data.data;
       await setAuth(token, user);
+      // A user who registered but quit before picking a role must finish that first.
+      if (user.roleSelected === false) {
+        router.replace('/(auth)/role-selection');
+        return;
+      }
       routeByRole(user.role);
     },
-    onError: (err) => {
-      Alert.alert('Sign In Failed', getApiErrorMessage(err));
+    onError: () => {
+      setServerError('The email or password you entered is incorrect.');
     },
   });
 
@@ -68,8 +72,8 @@ export default function LoginScreen() {
       await setAuth(token, user);
       router.push('/(auth)/role-selection');
     },
-    onError: (err) => {
-      Alert.alert('Sign Up Failed', getApiErrorMessage(err));
+    onError: () => {
+      setServerError('Something went wrong. Please try again.');
     },
   });
 
@@ -88,8 +92,8 @@ export default function LoginScreen() {
         routeByRole(user.role);
       }
     },
-    onError: (err) => {
-      Alert.alert('Google Sign In Failed', getApiErrorMessage(err));
+    onError: () => {
+      setServerError('Google sign in failed. Please try again.');
     },
   });
 
@@ -111,12 +115,16 @@ export default function LoginScreen() {
     const e: Record<string, string> = {};
     if (!fullName.trim()) e.fullName = 'Full name is required.';
     if (!isValidEmail(email)) e.email = 'Enter a valid email address.';
-    if (!isValidPassword(password)) e.password = 'Password must be at least 8 characters.';
+    // Enforce ALL password rules before allowing sign-up.
+    if (!meetsAllPasswordRules(password)) {
+      e.password = 'Password must be 8+ characters with an uppercase letter and a number.';
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   }
 
   function handleSubmit() {
+    setServerError('');
     if (activeTab === 'signin') {
       if (validateSignIn()) loginMutation.mutate();
     } else {
@@ -146,12 +154,20 @@ export default function LoginScreen() {
         credential.identityToken!,
         fullNameStr || undefined,
       );
-      const { token, user } = res.data.data;
+      const { token, user, requiresRoleSelection } = res.data.data as {
+        token: string;
+        user: import('@/types/user').User;
+        requiresRoleSelection?: boolean;
+      };
       await setAuth(token, user);
+      if (requiresRoleSelection || user.roleSelected === false) {
+        router.push('/(auth)/role-selection');
+        return;
+      }
       routeByRole(user.role);
     } catch (err: unknown) {
       if ((err as { code?: string }).code !== 'ERR_CANCELED') {
-        Alert.alert('Apple Sign In Failed', 'Something went wrong. Please try again.');
+        setServerError('Apple sign in failed. Please try again.');
       }
     }
   }
@@ -193,6 +209,7 @@ export default function LoginScreen() {
               onPress={() => {
                 setActiveTab('signin');
                 setErrors({});
+                setServerError('');
               }}
               className={`flex-1 py-3 rounded-full items-center ${
                 activeTab === 'signin' ? 'bg-primary' : 'bg-transparent'
@@ -210,6 +227,7 @@ export default function LoginScreen() {
               onPress={() => {
                 setActiveTab('signup');
                 setErrors({});
+                setServerError('');
               }}
               className={`flex-1 py-3 rounded-full items-center ${
                 activeTab === 'signup' ? 'bg-primary' : 'bg-transparent'
@@ -304,6 +322,22 @@ export default function LoginScreen() {
               {errors.password ? (
                 <Text className="text-xs text-danger ml-2">{errors.password}</Text>
               ) : null}
+              {activeTab === 'signup' && (
+                <View style={{ marginTop: 8, gap: 4 }}>
+                  {[
+                    { label: 'At least 8 characters', met: password.length >= 8 },
+                    { label: '1 uppercase letter',    met: /[A-Z]/.test(password) },
+                    { label: '1 number',              met: /[0-9]/.test(password) },
+                  ].map(({ label, met }) => (
+                    <View key={label} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: met ? '#38A169' : '#E2E8F0', alignItems: 'center', justifyContent: 'center' }}>
+                        {met && <Check size={8} color="#fff" strokeWidth={3} />}
+                      </View>
+                      <Text style={{ fontSize: 11, color: met ? '#38A169' : '#A0AEC0' }}>{label}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
 
             {activeTab === 'signin' && (
@@ -314,6 +348,13 @@ export default function LoginScreen() {
               </View>
             )}
           </View>
+
+          {/* Server error */}
+          {serverError ? (
+            <View className="mt-4 rounded-2xl px-4 py-3" style={{ backgroundColor: 'rgba(229,62,62,0.08)', borderWidth: 1, borderColor: 'rgba(229,62,62,0.2)' }}>
+              <Text className="text-sm text-danger text-center" style={{ lineHeight: 20 }}>{serverError}</Text>
+            </View>
+          ) : null}
 
           {/* Primary Button */}
           <Pressable

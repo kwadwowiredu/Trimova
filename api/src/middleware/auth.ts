@@ -6,7 +6,8 @@ import { sendError } from '../utils/response';
 export function authenticate(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
-    sendError(res, 'Unauthorised. No token provided.', 401);
+    // 'TOKEN_INVALID' code => the client should clear the stored token & re-auth.
+    sendError(res, 'Unauthorised. No token provided.', 401, 'TOKEN_INVALID');
     return;
   }
 
@@ -16,7 +17,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
     req.user = payload;
     next();
   } catch {
-    sendError(res, 'Unauthorised. Invalid or expired token.', 401);
+    sendError(res, 'Unauthorised. Invalid or expired token.', 401, 'TOKEN_INVALID');
   }
 }
 

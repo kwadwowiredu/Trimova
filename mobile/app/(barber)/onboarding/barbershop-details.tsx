@@ -59,12 +59,13 @@ export default function BarbershopDetailsScreen() {
         phone: localPhone.trim() || undefined,
       } as any);
 
-      // 2. Save location if provided
+      // 2. Save location if provided (freelancers also persist their travel radius)
       if (location) {
         await barbersService.updateLocation({
           lat: location.lat,
           lng: location.lng,
           address: location.address,
+          ...(barberType === 'mobile' ? { serviceRadius: useOnboardingStore.getState().serviceRadius } : {}),
         });
       }
 
@@ -75,7 +76,9 @@ export default function BarbershopDetailsScreen() {
     onSuccess: async (updatedUser) => {
       const token = useAuthStore.getState().token!;
       await setAuth(token, updatedUser);
-      router.replace('/(barber)/(tabs)');
+      // Business details saved. Land on the "Complete Your Profile" welcome,
+      // then run the rest of the profile wizard.
+      router.replace('/(barber)/onboarding/welcome');
     },
     onError: (err) => {
       Alert.alert('Setup Failed', getApiErrorMessage(err));

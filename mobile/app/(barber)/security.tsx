@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,38 +6,43 @@ import {
   ScrollView,
   TextInput,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRef } from 'react';
 import { router } from 'expo-router';
-import { ChevronLeft, Eye, EyeOff, Lock, Shield, FileText, Check } from 'lucide-react-native';
+import { useMutation } from '@tanstack/react-query';
+import { ChevronLeft, Eye, EyeOff, Shield, FileText, Check } from 'lucide-react-native';
+import { authService } from '@/services/auth';
+import { useThemeColors } from '@/hooks/useThemeColors';
 
 function PasswordInput({
   label, value, onChangeText, placeholder, error,
 }: {
   label: string; value: string; onChangeText: (t: string) => void; placeholder: string; error?: string;
 }) {
+  const c = useThemeColors();
   const [show, setShow] = useState(false);
   return (
     <View style={{ marginBottom: 14 }}>
-      <Text style={{ fontSize: 11, fontWeight: '800', color: '#A0AEC0', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 5 }}>{label}</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F7FAFC', borderRadius: 12, paddingHorizontal: 14, borderWidth: 1.5, borderColor: error ? '#E53E3E' : '#E2E8F0' }}>
+      <Text style={{ fontSize: 11, fontWeight: '800', color: c.textFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 5 }}>{label}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.surfaceAlt, borderRadius: 12, paddingHorizontal: 14, borderWidth: 1.5, borderColor: error ? c.danger : c.border }}>
         <TextInput
           value={value} onChangeText={onChangeText} placeholder={placeholder}
-          placeholderTextColor="#CBD5E0" secureTextEntry={!show}
-          style={{ flex: 1, paddingVertical: 13, fontSize: 14, color: '#1A202C' }}
+          placeholderTextColor={c.textFaint} secureTextEntry={!show}
+          style={{ flex: 1, paddingVertical: 13, fontSize: 14, color: c.text }}
         />
         <Pressable onPress={() => setShow((p) => !p)} hitSlop={8}>
-          {show ? <EyeOff size={18} color="#A0AEC0" /> : <Eye size={18} color="#A0AEC0" />}
+          {show ? <EyeOff size={18} color={c.textFaint} /> : <Eye size={18} color={c.textFaint} />}
         </Pressable>
       </View>
-      {error ? <Text style={{ color: '#E53E3E', fontSize: 11, marginTop: 4 }}>{error}</Text> : null}
+      {error ? <Text style={{ color: c.danger, fontSize: 11, marginTop: 4 }}>{error}</Text> : null}
     </View>
   );
 }
 
 export default function SecurityScreen() {
   const insets = useSafeAreaInsets();
+  const c = useThemeColors();
 
   const [currentPw, setCurrentPw] = useState('');
   const [newPw,     setNewPw]     = useState('');
@@ -55,6 +60,18 @@ export default function SecurityScreen() {
     ]).start();
   }
 
+  const changePasswordMutation = useMutation({
+    mutationFn: () => authService.changePassword(currentPw, newPw),
+    onSuccess: () => {
+      setCurrentPw(''); setNewPw(''); setConfirmPw('');
+      setErrors({});
+      showToast();
+    },
+    onError: () => {
+      setErrors((prev) => ({ ...prev, currentPw: 'Current password is incorrect.' }));
+    },
+  });
+
   function handleChangePassword() {
     const errs: Record<string, string> = {};
     if (!currentPw) errs.currentPw = 'Current password is required';
@@ -64,27 +81,31 @@ export default function SecurityScreen() {
     if (newPw !== confirmPw) errs.confirmPw = 'Passwords do not match';
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
-
-    setCurrentPw(''); setNewPw(''); setConfirmPw('');
-    // TODO: POST /api/auth/change-password { currentPassword: currentPw, newPassword: newPw }
-    showToast();
+    changePasswordMutation.mutate();
   }
 
-  return (
-    <View style={{ flex: 1, backgroundColor: '#F5F6F8', paddingTop: insets.top }}>
+  const cardStyle = {
+    backgroundColor: c.surface, borderRadius: 20, borderWidth: 1, borderColor: c.border,
+  };
 
-      <View style={{ backgroundColor: '#fff', flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#f1f2f3' }}>
-        <Pressable onPress={() => router.back()} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#f1f2f3', alignItems: 'center', justifyContent: 'center' }}>
-          <ChevronLeft size={20} color="#4A5568" />
+  return (
+    <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top }}>
+
+      <View style={{ backgroundColor: c.surface, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: c.border }}>
+        <Pressable onPress={() => router.back()} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+          <ChevronLeft size={20} color={c.textMuted} />
         </Pressable>
-        <Text style={{ flex: 1, fontSize: 17, fontWeight: '700', color: '#1A202C' }}>Login & Security</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: c.text }}>Login & Security</Text>
+          <Text style={{ fontSize: 11, color: c.textFaint, marginTop: 1 }}>Change password & account security</Text>
+        </View>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
 
         {/* Change password */}
-        <Text style={{ fontSize: 11, fontWeight: '800', color: '#A0AEC0', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10, marginLeft: 2 }}>Change Password</Text>
-        <View style={{ backgroundColor: '#fff', borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0', padding: 18, marginBottom: 20, shadowColor: '#1A202C', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 }}>
+        <Text style={{ fontSize: 11, fontWeight: '800', color: c.textFaint, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10, marginLeft: 2 }}>Change Password</Text>
+        <View style={{ ...cardStyle, padding: 18, marginBottom: 20 }}>
           <PasswordInput label="Current Password" value={currentPw} onChangeText={setCurrentPw} placeholder="Enter current password" error={errors.currentPw} />
           <PasswordInput label="New Password"     value={newPw}     onChangeText={setNewPw}     placeholder="At least 8 chars, 1 uppercase, 1 number" error={errors.newPw} />
           <PasswordInput label="Confirm Password" value={confirmPw} onChangeText={setConfirmPw} placeholder="Repeat new password" error={errors.confirmPw} />
@@ -97,37 +118,44 @@ export default function SecurityScreen() {
             { rule: 'Passwords match',          met: newPw === confirmPw && confirmPw.length > 0 },
           ].map(({ rule, met }) => (
             <View key={rule} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: met ? '#38A169' : '#f1f2f3', alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: met ? c.success : c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
                 {met && <Check size={10} color="#fff" strokeWidth={3} />}
               </View>
-              <Text style={{ fontSize: 12, color: met ? '#38A169' : '#A0AEC0' }}>{rule}</Text>
+              <Text style={{ fontSize: 12, color: met ? c.success : c.textFaint }}>{rule}</Text>
             </View>
           ))}
 
-          <Pressable onPress={handleChangePassword} style={{ backgroundColor: '#3c3cb9', borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 16 }}>
-            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>Update Password</Text>
+          <Pressable
+            onPress={handleChangePassword}
+            disabled={changePasswordMutation.isPending}
+            style={{ backgroundColor: c.accent, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 16, opacity: changePasswordMutation.isPending ? 0.6 : 1 }}
+          >
+            {changePasswordMutation.isPending
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>Update Password</Text>
+            }
           </Pressable>
         </View>
 
         {/* Coming soon rows */}
-        <Text style={{ fontSize: 11, fontWeight: '800', color: '#A0AEC0', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10, marginLeft: 2 }}>Advanced Security</Text>
-        <View style={{ backgroundColor: '#fff', borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', shadowColor: '#1A202C', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 }}>
+        <Text style={{ fontSize: 11, fontWeight: '800', color: c.textFaint, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10, marginLeft: 2 }}>Advanced Security</Text>
+        <View style={{ ...cardStyle, overflow: 'hidden' }}>
           {[
-            { icon: <Shield size={17} color="#CBD5E0" />, label: 'Two-Factor Authentication', subtitle: 'Add an extra layer of security' },
-            { icon: <FileText size={17} color="#CBD5E0" />, label: 'Privacy Policy', subtitle: 'View our data handling policy' },
+            { icon: <Shield size={17} color={c.textFaint} />, label: 'Two-Factor Authentication', subtitle: 'Add an extra layer of security' },
+            { icon: <FileText size={17} color={c.textFaint} />, label: 'Privacy Policy', subtitle: 'View our data handling policy' },
           ].map(({ icon, label, subtitle }, i) => (
             <View key={label}>
-              {i > 0 && <View style={{ height: 1, backgroundColor: '#f1f2f3', marginHorizontal: 16 }} />}
-              <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14, opacity: 0.5 }}>
-                <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#f1f2f3', alignItems: 'center', justifyContent: 'center' }}>
+              {i > 0 && <View style={{ height: 1, backgroundColor: c.border, marginHorizontal: 16 }} />}
+              <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14, opacity: 0.6 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
                   {icon}
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 15, fontWeight: '600', color: '#A0AEC0' }}>{label}</Text>
-                  <Text style={{ fontSize: 12, color: '#CBD5E0', marginTop: 1 }}>{subtitle}</Text>
+                  <Text style={{ fontSize: 15, fontWeight: '600', color: c.textMuted }}>{label}</Text>
+                  <Text style={{ fontSize: 12, color: c.textFaint, marginTop: 1 }}>{subtitle}</Text>
                 </View>
-                <View style={{ backgroundColor: '#f1f2f3', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 }}>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#A0AEC0' }}>Coming Soon</Text>
+                <View style={{ backgroundColor: c.surfaceAlt, borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 }}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: c.textFaint }}>Coming Soon</Text>
                 </View>
               </View>
             </View>
@@ -140,13 +168,13 @@ export default function SecurityScreen() {
         pointerEvents="none"
         style={{
           position: 'absolute', top: insets.top + 70, left: 20, right: 20,
-          backgroundColor: '#38A169', borderRadius: 14,
+          backgroundColor: c.success, borderRadius: 14,
           paddingVertical: 14, paddingHorizontal: 18,
           flexDirection: 'row', alignItems: 'center', gap: 10,
           zIndex: 999,
           opacity: toastAnim,
           transform: [{ translateY: toastAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }],
-          shadowColor: '#38A169', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8,
+          shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8,
         }}
       >
         <Check size={18} color="#ffffff" />

@@ -4,8 +4,9 @@ import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as SecureStore from 'expo-secure-store';
-import { authService } from '@/services/auth';
+import { useColorScheme } from 'nativewind';
 import { useAuthStore } from '@/stores/authStore';
+import { useThemeStore } from '@/stores/themeStore';
 import { TOKEN_STORAGE_KEY } from '@/utils/constants';
 
 const queryClient = new QueryClient({
@@ -25,32 +26,41 @@ export default function RootLayout() {
   );
 }
 
-/**
- * Runs the auth bootstrap (reads token from SecureStore, validates with API).
- * Redirect logic lives in app/index.tsx using <Redirect> — declarative and
- * timing-safe, unlike router.replace() in a useEffect.
- */
 function RootLayoutInner() {
-  const { setAuth, logout, setLoading } = useAuthStore();
+  const { syncUser, hasHydrated } = useAuthStore();
+  const { loadMode, mode } = useThemeStore();
+  const { setColorScheme } = useColorScheme();
 
   useEffect(() => {
+    loadMode();
+  }, []);
+
+  useEffect(() => {
+    if (mode === 'system') {
+      setColorScheme('system');
+    } else {
+      setColorScheme(mode);
+    }
+  }, [mode]);
+
+  // Instant load from cache, then a silent background refresh from the backend.
+  useEffect(() => {
+    if (!hasHydrated) return;
     async function bootstrap() {
       const storedToken = await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
       if (!storedToken) {
-        setLoading(false);
+        // No session — clear any stale cached profile.
+        await useAuthStore.getState().logout();
         return;
       }
-      try {
-        const res = await authService.getMe();
-        await setAuth(storedToken, res.data.data);
-      } catch {
-        await logout();
-      }
+      // The cached profile (if any) is already hydrated, so render immediately…
+      useAuthStore.setState({ token: storedToken, isLoading: false });
+      // …then silently reconcile with the latest server state.
+      syncUser();
     }
     bootstrap();
-  }, []);
+  }, [hasHydrated]);
 
-  // GestureHandlerRootView is required at the root for Swipeable + gesture-handler to work.
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <Stack screenOptions={{ headerShown: false }} />

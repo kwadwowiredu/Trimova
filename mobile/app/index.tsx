@@ -24,6 +24,11 @@ export default function Index() {
     return <Redirect href="/(auth)/login" />;
   }
 
+  // Registered but never confirmed a role (e.g. quit right after "Create Account").
+  if ((user as any)?.roleSelected === false) {
+    return <Redirect href="/(auth)/role-selection" />;
+  }
+
   if (role === 'client') {
     return <Redirect href="/(client)/(tabs)" />;
   }

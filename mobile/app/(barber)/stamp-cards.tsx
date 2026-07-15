@@ -1,358 +1,267 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   View,
   Text,
   Pressable,
   ScrollView,
   TextInput,
+  Modal,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import {
-  ChevronLeft,
-  Gift,
-  CheckSquare,
-  Square,
-  Plus,
-  Minus,
-  Info,
-  Check,
-} from 'lucide-react-native';
+import { ChevronLeft, Gift, Check, X, Info, ChevronRight, ShieldCheck } from 'lucide-react-native';
+import { useThemeColors } from '@/hooks/useThemeColors';
+import { useAuthStore } from '@/stores/authStore';
 
-const ALL_SERVICES = [
-  'Haircut & Beard',
-  'Executive Fade',
-  'Beard Trim',
-  'Skin Fade',
-  'Shampoo & Style',
-  'Head Shave',
-  'Kids Haircut',
+const MILESTONES = [5, 8, 10, 12];
+
+type Restriction = 'all' | 'haircuts' | 'premium';
+const RESTRICTIONS: { value: Restriction; label: string; desc: string }[] = [
+  { value: 'all',      label: 'All Services',            desc: 'Every booking earns the client a stamp.' },
+  { value: 'haircuts', label: 'Haircuts Only',           desc: 'Only haircut services count toward a stamp.' },
+  { value: 'premium',  label: 'Premium Treatments Only', desc: 'Only your premium services earn a stamp.' },
 ];
 
-type RewardType = 'free_service' | 'discount';
+type RewardType = 'percent' | 'flat' | 'custom';
+const DEADLINES = ['Never', '3 Months', '6 Months', '1 Year'];
 
-function Label({ children }: { children: string }) {
-  return (
-    <Text style={{ fontSize: 11, fontWeight: '800', color: '#312e81', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 }}>
-      {children}
-    </Text>
-  );
-}
-
-function PurpleInput({
-  value, onChangeText, placeholder, keyboardType = 'default', suffix,
-}: {
-  value: string; onChangeText: (t: string) => void; placeholder: string;
-  keyboardType?: 'default' | 'numeric' | 'decimal-pad'; suffix?: string;
-}) {
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13, borderWidth: 1.5, borderColor: '#c7c7f5' }}>
-      <TextInput
-        value={value} onChangeText={onChangeText} placeholder={placeholder}
-        placeholderTextColor="#9999dd" keyboardType={keyboardType}
-        style={{ flex: 1, fontSize: 15, fontWeight: '600', color: '#1A202C', paddingVertical: 0 }}
-      />
-      {suffix && <Text style={{ fontSize: 14, fontWeight: '700', color: '#3c3cb9', marginLeft: 4 }}>{suffix}</Text>}
-    </View>
-  );
+// Deterministic 4-digit validation code from the barber's id (stable per workspace).
+function codeFromId(id?: string) {
+  if (!id) return '0000';
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return String(h % 10000).padStart(4, '0');
 }
 
 export default function StampCardsScreen() {
   const insets = useSafeAreaInsets();
+  const c = useThemeColors();
+  const { user } = useAuthStore();
+  const validationCode = codeFromId(user?.id);
 
-  const [isActive,       setIsActive]       = useState(false);
-  const [stampsRequired, setStampsRequired] = useState(5);
-  const [stampServices,  setStampServices]  = useState<string[]>(ALL_SERVICES.slice(0, 3));
-  const [rewardType,     setRewardType]     = useState<RewardType>('free_service');
-  const [rewardService,  setRewardService]  = useState(ALL_SERVICES[0]);
-  const [rewardDiscount, setRewardDiscount] = useState('');
+  const [isActive,    setIsActive]    = useState(false);
+  const [milestone,   setMilestone]   = useState(10);
+  const [restriction, setRestriction] = useState<Restriction>('all');
+  const [rewardType,  setRewardType]  = useState<RewardType>('percent');
+  const [rewardValue, setRewardValue] = useState('');
+  const [rewardText,  setRewardText]  = useState('');
+  const [deadline,    setDeadline]    = useState('Never');
+  const [showDeadline, setShowDeadline] = useState(false);
 
-  function adjustStamps(delta: number) {
-    setStampsRequired((prev) => Math.min(20, Math.max(2, prev + delta)));
-  }
+  const toastAnim = useRef(new Animated.Value(0)).current;
+  const [toastMsg, setToastMsg] = useState('');
+  const [toastOk,  setToastOk]  = useState(true);
 
-  function toggleStampService(service: string) {
-    setStampServices((prev) =>
-      prev.includes(service) ? prev.filter((s) => s !== service) : [...prev, service],
-    );
+  function showToast(msg: string, ok: boolean) {
+    setToastMsg(msg); setToastOk(ok);
+    toastAnim.setValue(0);
+    Animated.sequence([
+      Animated.timing(toastAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
+      Animated.delay(2400),
+      Animated.timing(toastAnim, { toValue: 0, duration: 250, useNativeDriver: true }),
+    ]).start();
   }
 
   function handleActivate() {
+    if (rewardType === 'custom' ? !rewardText.trim() : !(Number(rewardValue) > 0)) {
+      showToast('Set the reward clients will earn', false);
+      return;
+    }
+    // NOTE: persists locally only until the loyalty backend (stamp_card_configs) is built.
     setIsActive(true);
-    // TODO: POST /api/barbers/me/stamp-cards
+    showToast('Stamp card is now active', true);
   }
 
-  function handleDeactivate() {
-    setIsActive(false);
-    // TODO: DELETE /api/barbers/me/stamp-cards/active
-  }
+  const label = { fontSize: 11, fontWeight: '800' as const, color: c.textFaint, letterSpacing: 0.8, textTransform: 'uppercase' as const, marginBottom: 10 };
+  const earned = Math.floor(milestone / 2);
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#f0f0ff', paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top }}>
 
       {/* Header */}
-      <View style={{ backgroundColor: '#3c3cb9', paddingBottom: 18, overflow: 'hidden' }}>
-        <View style={{ position: 'absolute', width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.08)', top: -70, right: -50 }} />
-        <View style={{ position: 'absolute', width: 150, height: 150, borderRadius: 75, backgroundColor: 'rgba(124,92,196,0.4)', bottom: -40, left: -20 }} />
-
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 12 }}>
-          <Pressable
-            onPress={() => router.back()}
-            style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}
-          >
-            <ChevronLeft size={20} color="#ffffff" />
-          </Pressable>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 18, fontWeight: '800', color: '#ffffff' }}>Stamp Cards</Text>
-            <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', marginTop: 1 }}>Reward loyal clients</Text>
-          </View>
-          <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-            <Gift size={20} color="#ffffff" />
-          </View>
+      <View style={{ backgroundColor: c.surface, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: c.border }}>
+        <Pressable onPress={() => router.back()} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+          <ChevronLeft size={20} color={c.textMuted} />
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: c.text }}>Stamp Cards</Text>
+          <Text style={{ fontSize: 11, color: c.textFaint, marginTop: 1 }}>Reward your loyal clients</Text>
         </View>
-
-        {/* Status button */}
-        <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
-          <Pressable
-            onPress={isActive ? handleDeactivate : () => {}}
-            style={{
-              backgroundColor: isActive ? '#38A169' : 'rgba(255,255,255,0.2)',
-              borderRadius: 24,
-              paddingVertical: 10,
-              paddingHorizontal: 20,
-              alignSelf: 'flex-start',
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-            }}
-          >
-            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: isActive ? '#fff' : 'rgba(255,255,255,0.4)' }} />
-            <Text style={{ fontSize: 13, fontWeight: '800', color: isActive ? '#ffffff' : 'rgba(255,255,255,0.55)' }}>
-              {isActive ? 'Active — Tap to Deactivate' : 'Inactive'}
-            </Text>
-          </Pressable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: isActive ? 'rgba(56,161,105,0.12)' : c.surfaceAlt }}>
+          <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: isActive ? c.success : c.textFaint }} />
+          <Text style={{ fontSize: 12, fontWeight: '700', color: isActive ? c.success : c.textFaint }}>{isActive ? 'Active' : 'Inactive'}</Text>
         </View>
       </View>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ padding: 16, paddingBottom: 60, gap: 16 }}
-      >
+      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, paddingBottom: 48, gap: 22 }}>
 
-        {/* Stamp preview card */}
-        <View style={{
-          backgroundColor: '#ffffff',
-          borderRadius: 20,
-          borderWidth: 1.5,
-          borderColor: '#c7c7f5',
-          padding: 18,
-        }}>
-          <Text style={{ fontSize: 11, fontWeight: '800', color: '#3c3cb9', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 12 }}>
-            Client Preview
-          </Text>
+        {/* Preview */}
+        <View style={{ backgroundColor: c.surface, borderRadius: 16, borderWidth: 1, borderColor: c.border, padding: 16 }}>
+          <Text style={{ ...label, marginBottom: 12 }}>Client Preview</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+            {Array.from({ length: milestone }).map((_, i) => (
+              <View key={i} style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: i < earned ? c.accent : 'transparent', borderWidth: 2, borderColor: i < earned ? c.accent : c.border, alignItems: 'center', justifyContent: 'center' }}>
+                {i < earned && <Check size={11} color="#fff" strokeWidth={3} />}
+              </View>
+            ))}
+          </View>
+        </View>
 
-          {/* Stamp grid preview */}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-            {Array.from({ length: stampsRequired }).map((_, i) => {
-              const earned = i < Math.floor(stampsRequired / 2);
+        {/* Milestone target */}
+        <View>
+          <Text style={label}>Stamps To Unlock Reward</Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {MILESTONES.map((m) => {
+              const on = milestone === m;
               return (
-                <View
-                  key={i}
-                  style={{
-                    width: 34, height: 34, borderRadius: 17,
-                    backgroundColor: earned ? '#3c3cb9' : 'transparent',
-                    borderWidth: 2,
-                    borderColor: earned ? '#3c3cb9' : '#c7c7f5',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  {earned && <Check size={14} color="#ffffff" strokeWidth={3} />}
-                </View>
+                <Pressable key={m} onPress={() => setMilestone(m)} style={{ flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: on ? c.accent : c.surface, borderWidth: 1, borderColor: on ? c.accent : c.border }}>
+                  <Text style={{ fontSize: 18, fontWeight: '800', color: on ? '#fff' : c.text }}>{m}</Text>
+                </Pressable>
               );
             })}
           </View>
+        </View>
 
-          <Text style={{ fontSize: 12, color: '#718096' }}>
-            Collect {stampsRequired} stamps → unlock reward
+        {/* Earning restrictions (radio cards — matches the inspo) */}
+        <View>
+          <Text style={label}>Which Services Earn Stamps</Text>
+          <View style={{ gap: 10 }}>
+            {RESTRICTIONS.map((r) => {
+              const on = restriction === r.value;
+              return (
+                <Pressable
+                  key={r.value}
+                  onPress={() => setRestriction(r.value)}
+                  style={{ flexDirection: 'row', gap: 12, backgroundColor: c.surface, borderRadius: 14, borderWidth: 1.5, borderColor: on ? c.accent : c.border, padding: 16 }}
+                >
+                  <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: on ? c.accent : c.textFaint, alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>
+                    {on && <View style={{ width: 11, height: 11, borderRadius: 6, backgroundColor: c.accent }} />}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: c.text }}>{r.label}</Text>
+                    <Text style={{ fontSize: 12, color: c.textMuted, marginTop: 3, lineHeight: 17 }}>{r.desc}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Reward matrix */}
+        <View>
+          <Text style={label}>Reward</Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+            {([['percent', '% Off'], ['flat', 'GHS Off'], ['custom', 'Custom']] as [RewardType, string][]).map(([t, lbl]) => (
+              <Pressable key={t} onPress={() => setRewardType(t)} style={{ flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: rewardType === t ? c.accent : c.surface, borderWidth: 1, borderColor: rewardType === t ? c.accent : c.border }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: rewardType === t ? '#fff' : c.textMuted }}>{lbl}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {rewardType === 'custom' ? (
+            <TextInput
+              value={rewardText} onChangeText={setRewardText}
+              placeholder="e.g. Free drink & a fresh towel hot-shave" placeholderTextColor={c.textFaint}
+              style={{ backgroundColor: c.surface, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13, fontSize: 14, color: c.text, borderWidth: 1, borderColor: c.border }}
+            />
+          ) : (
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.surface, borderRadius: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: c.border }}>
+              <TextInput
+                value={rewardValue} onChangeText={setRewardValue}
+                placeholder={rewardType === 'percent' ? '50' : '20.00'} placeholderTextColor={c.textFaint}
+                keyboardType="decimal-pad"
+                style={{ flex: 1, paddingVertical: 13, fontSize: 14, fontWeight: '700', color: c.text }}
+              />
+              <Text style={{ fontSize: 14, fontWeight: '700', color: c.textFaint }}>{rewardType === 'percent' ? '%' : 'GHS'}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Stamp deadline */}
+        <View>
+          <Text style={label}>Stamp Deadline</Text>
+          <Pressable onPress={() => setShowDeadline(true)} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.surface, borderRadius: 12, borderWidth: 1, borderColor: c.border, paddingHorizontal: 14, paddingVertical: 15 }}>
+            <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: c.text }}>{deadline}</Text>
+            <ChevronRight size={18} color={c.textFaint} />
+          </Pressable>
+        </View>
+
+        {/* Validation code (anti-cheat) */}
+        <View style={{ backgroundColor: c.accentSoft, borderRadius: 16, padding: 18 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <ShieldCheck size={16} color={c.accent} />
+            <Text style={{ fontSize: 13, fontWeight: '800', color: c.accent }}>Your Validation Code</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 8 }}>
+            {validationCode.split('').map((d, i) => (
+              <View key={i} style={{ width: 46, height: 56, borderRadius: 12, backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border }}>
+                <Text style={{ fontSize: 26, fontWeight: '800', color: c.text }}>{d}</Text>
+              </View>
+            ))}
+          </View>
+          <Text style={{ fontSize: 12, color: c.accent, lineHeight: 18 }}>
+            After an appointment, read this 4-digit code to your client. They enter it in their app to unlock the stamp — proving the visit really happened.
           </Text>
         </View>
 
-        {/* Config card */}
-        <View style={{
-          backgroundColor: '#ffffff',
-          borderRadius: 20,
-          borderWidth: 1.5,
-          borderColor: '#c7c7f5',
-          shadowColor: '#1e1b4b',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.07,
-          shadowRadius: 8,
-          elevation: 3,
-          padding: 20,
-          gap: 20,
-        }}>
-
-          {/* Stamps stepper */}
-          <View>
-            <Label>Stamps Required to Unlock</Label>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Pressable
-                onPress={() => adjustStamps(-1)}
-                disabled={stampsRequired <= 2}
-                style={{
-                  width: 44, height: 44, borderRadius: 22,
-                  backgroundColor: stampsRequired <= 2 ? '#f1f2f3' : '#e0e0ff',
-                  alignItems: 'center', justifyContent: 'center',
-                  opacity: stampsRequired <= 2 ? 0.5 : 1,
-                }}
-              >
-                <Minus size={18} color="#3c3cb9" />
-              </Pressable>
-
-              <View style={{ flex: 1, alignItems: 'center' }}>
-                <Text style={{ fontSize: 32, fontWeight: '800', color: '#1A202C' }}>{stampsRequired}</Text>
-                <Text style={{ fontSize: 12, color: '#A0AEC0', marginTop: 2 }}>stamps</Text>
-              </View>
-
-              <Pressable
-                onPress={() => adjustStamps(1)}
-                disabled={stampsRequired >= 20}
-                style={{
-                  width: 44, height: 44, borderRadius: 22,
-                  backgroundColor: stampsRequired >= 20 ? '#f1f2f3' : '#e0e0ff',
-                  alignItems: 'center', justifyContent: 'center',
-                  opacity: stampsRequired >= 20 ? 0.5 : 1,
-                }}
-              >
-                <Plus size={18} color="#3c3cb9" />
-              </Pressable>
-            </View>
-          </View>
-
-          {/* Services that earn stamps */}
-          <View>
-            <Label>Services That Earn Stamps</Label>
-            <Text style={{ fontSize: 12, color: '#718096', marginBottom: 8, lineHeight: 17 }}>
-              Clients only get a stamp when they book a checked service.
-            </Text>
-            <View style={{ backgroundColor: '#f0f0ff', borderRadius: 14, borderWidth: 1.5, borderColor: '#c7c7f5', overflow: 'hidden' }}>
-              {ALL_SERVICES.map((service, i) => {
-                const selected = stampServices.includes(service);
-                return (
-                  <View key={service}>
-                    {i > 0 && <View style={{ height: 1, backgroundColor: '#e0e0ff', marginHorizontal: 14 }} />}
-                    <Pressable
-                      onPress={() => toggleStampService(service)}
-                      style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 13, gap: 12 }}
-                    >
-                      {selected
-                        ? <CheckSquare size={18} color="#3c3cb9" />
-                        : <Square size={18} color="#c7c7f5" />}
-                      <Text style={{ flex: 1, fontSize: 14, fontWeight: selected ? '600' : '400', color: selected ? '#1A202C' : '#718096' }}>
-                        {service}
-                      </Text>
-                    </Pressable>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-
-          {/* Reward type */}
-          <View>
-            <Label>Reward Type</Label>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              {(['free_service', 'discount'] as RewardType[]).map((opt, i) => (
-                <Pressable
-                  key={opt}
-                  onPress={() => setRewardType(opt)}
-                  style={{
-                    flex: 1, paddingVertical: 11, borderRadius: 12, alignItems: 'center',
-                    backgroundColor: rewardType === opt ? '#3c3cb9' : '#e0e0ff',
-                    borderWidth: 1.5, borderColor: rewardType === opt ? '#3c3cb9' : '#c7c7f5',
-                  }}
-                >
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: rewardType === opt ? '#ffffff' : '#3c3cb9' }}>
-                    {['Free Service', 'Discount %'][i]}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <View style={{ marginTop: 12 }}>
-              {rewardType === 'free_service' ? (
-                <View>
-                  <Text style={{ fontSize: 12, color: '#718096', marginBottom: 8, lineHeight: 17 }}>
-                    Which service does the client receive as their free reward?
-                  </Text>
-                  <View style={{ backgroundColor: '#f0f0ff', borderRadius: 14, borderWidth: 1.5, borderColor: '#c7c7f5', overflow: 'hidden' }}>
-                    {ALL_SERVICES.map((service, i) => (
-                      <View key={service}>
-                        {i > 0 && <View style={{ height: 1, backgroundColor: '#e0e0ff', marginHorizontal: 14 }} />}
-                        <Pressable
-                          onPress={() => setRewardService(service)}
-                          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 13, gap: 12 }}
-                        >
-                          <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: rewardService === service ? '#3c3cb9' : '#c7c7f5', alignItems: 'center', justifyContent: 'center' }}>
-                            {rewardService === service && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#3c3cb9' }} />}
-                          </View>
-                          <Text style={{ flex: 1, fontSize: 14, fontWeight: rewardService === service ? '600' : '400', color: rewardService === service ? '#1A202C' : '#718096' }}>
-                            {service}
-                          </Text>
-                        </Pressable>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              ) : (
-                <View>
-                  <Text style={{ fontSize: 12, color: '#718096', marginBottom: 8 }}>
-                    What % discount does the client receive as their reward?
-                  </Text>
-                  <PurpleInput
-                    value={rewardDiscount}
-                    onChangeText={setRewardDiscount}
-                    placeholder="e.g. 50"
-                    keyboardType="decimal-pad"
-                    suffix="%"
-                  />
-                </View>
-              )}
-            </View>
-          </View>
-
-          {/* No-commission notice */}
-          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: 'rgba(56,161,105,0.08)', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(56,161,105,0.2)' }}>
-            <Info size={15} color="#276749" style={{ marginTop: 1 }} />
-            <Text style={{ flex: 1, fontSize: 12, color: '#276749', lineHeight: 18 }}>
-              No commission is deducted on the appointment where a client redeems their stamp reward. You keep 100% of the loyalty.
-            </Text>
-          </View>
-
-          {/* Activate button */}
-          <Pressable
-            onPress={handleActivate}
-            disabled={isActive}
-            style={{
-              backgroundColor: isActive ? '#CBD5E0' : '#3c3cb9',
-              borderRadius: 14,
-              paddingVertical: 16,
-              alignItems: 'center',
-              shadowColor: isActive ? 'transparent' : '#3c3cb9',
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.3,
-              shadowRadius: 8,
-              elevation: isActive ? 0 : 4,
-            }}
-          >
-            <Text style={{ fontSize: 15, fontWeight: '800', color: isActive ? '#A0AEC0' : '#ffffff' }}>
-              {isActive ? 'Stamp Card Active' : 'Activate Stamp Card'}
-            </Text>
-          </Pressable>
+        {/* Note */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+          <Info size={14} color={c.textFaint} style={{ marginTop: 2 }} />
+          <Text style={{ flex: 1, fontSize: 12, color: c.textMuted, lineHeight: 18 }}>
+            No commission is deducted when a client redeems their stamp reward — you keep 100%.
+          </Text>
         </View>
+
+        {/* Action */}
+        {isActive ? (
+          <Pressable onPress={() => { setIsActive(false); showToast('Stamp card deactivated', true); }} style={{ backgroundColor: c.surfaceAlt, borderRadius: 14, paddingVertical: 16, alignItems: 'center' }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: c.danger }}>Deactivate Stamp Card</Text>
+          </Pressable>
+        ) : (
+          <Pressable onPress={handleActivate} style={{ backgroundColor: c.accent, borderRadius: 14, paddingVertical: 16, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
+            <Gift size={16} color="#fff" />
+            <Text style={{ fontSize: 15, fontWeight: '800', color: '#fff' }}>Activate Stamp Card</Text>
+          </Pressable>
+        )}
       </ScrollView>
+
+      {/* Deadline picker */}
+      <Modal visible={showDeadline} transparent animationType="slide" onRequestClose={() => setShowDeadline(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: c.overlay }} onPress={() => setShowDeadline(false)} />
+        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: c.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: insets.bottom + 8 }}>
+          <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginTop: 10, marginBottom: 4 }} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14 }}>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: c.text }}>Stamp Deadline</Text>
+            <Pressable onPress={() => setShowDeadline(false)} hitSlop={10}><X size={22} color={c.textMuted} /></Pressable>
+          </View>
+          {DEADLINES.map((d, i) => {
+            const on = deadline === d;
+            return (
+              <Pressable key={d} onPress={() => { setDeadline(d); setShowDeadline(false); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 15, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: c.border, backgroundColor: on ? c.accentSoft : 'transparent' }}>
+                <Text style={{ fontSize: 15, fontWeight: on ? '700' : '500', color: on ? c.accent : c.text }}>{d}</Text>
+                {on && <Check size={18} color={c.accent} />}
+              </Pressable>
+            );
+          })}
+        </View>
+      </Modal>
+
+      {/* Toast */}
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute', top: insets.top + 70, left: 20, right: 20,
+          backgroundColor: toastOk ? c.success : c.danger, borderRadius: 14,
+          paddingVertical: 14, paddingHorizontal: 18,
+          flexDirection: 'row', alignItems: 'center', gap: 10, zIndex: 999,
+          opacity: toastAnim,
+          transform: [{ translateY: toastAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }],
+          shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 8,
+        }}
+      >
+        {toastOk ? <Check size={18} color="#fff" /> : <X size={18} color="#fff" />}
+        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14, flex: 1 }}>{toastMsg}</Text>
+      </Animated.View>
     </View>
   );
 }

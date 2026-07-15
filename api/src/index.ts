@@ -6,6 +6,9 @@ import morgan from 'morgan';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler';
 import authRoutes from './routes/auth';
 import barberRoutes from './routes/barbers';
+import uploadRoutes from './routes/uploads';
+import servicesRoutes from './routes/services';
+import workingHoursRoutes from './routes/workingHours';
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
@@ -22,6 +25,9 @@ app.get('/health', (_req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/barbers', barberRoutes);
+app.use('/api/uploads', uploadRoutes);
+app.use('/api/services', servicesRoutes);
+app.use('/api/working-hours', workingHoursRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

@@ -12,6 +12,11 @@ router.post('/forgot-password', authController.forgotPassword);
 router.post('/reset-password', authController.resetPassword);
 
 router.get('/me', authenticate, authController.getMe);
+router.patch('/me', authenticate, authController.updateProfile);
 router.patch('/role', authenticate, authController.updateRole);
+router.post('/change-password', authenticate, authController.changePassword);
+router.post('/verify-password', authenticate, authController.verifyPassword);
+router.post('/logout', authenticate, authController.logout);
+router.delete('/me', authenticate, authController.deleteAccount);
 
 export default router;

@@ -1,160 +1,88 @@
-import { View, Text, Pressable, ScrollView } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Text, Pressable, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { ChevronLeft, Zap, Gift, ChevronRight } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ChevronLeft, Info } from 'lucide-react-native';
+import { useThemeColors } from '@/hooks/useThemeColors';
+import { useAuthStore } from '@/stores/authStore';
 
-export default function LoyaltyProgramsScreen() {
+// Per-USER flag so every account sees the intro the first time they open it.
+const introKey = (userId: string | undefined) => `has_seen_loyalty_intro_${userId ?? 'guest'}`;
+
+// ─── Screen 1: Loyalty Welcome Intro ────────────────────────────────────────────
+
+export default function LoyaltyWelcomeScreen() {
   const insets = useSafeAreaInsets();
+  const c = useThemeColors();
+  const { user } = useAuthStore();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const seen = await AsyncStorage.getItem(introKey(user?.id));
+      if (!active) return;
+      if (seen === 'true') router.replace('/loyalty-dashboard' as any);
+      else setReady(true);
+    })();
+    return () => { active = false; };
+  }, [user?.id]);
+
+  async function handleEnable() {
+    await AsyncStorage.setItem(introKey(user?.id), 'true');
+    router.replace('/loyalty-dashboard' as any);
+  }
+
+  if (!ready) {
+    return <View style={{ flex: 1, backgroundColor: c.bg }} />;
+  }
 
   return (
-    <View className="flex-1 bg-neutral-100" style={{ paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top }}>
 
-      {/* Header */}
-      <View className="flex-row items-center gap-3 px-4 py-3 bg-white border-b border-neutral-200">
-        <Pressable
-          onPress={() => router.back()}
-          className="w-9 h-9 rounded-xl bg-neutral-100 items-center justify-center active:opacity-70"
-        >
-          <ChevronLeft size={20} color="#4A5568" />
+      {/* Header — back · title · info */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 12 }}>
+        <Pressable onPress={() => router.back()} hitSlop={8}>
+          <ChevronLeft size={26} color={c.text} />
         </Pressable>
-        <View className="flex-1">
-          <Text className="text-[17px] font-bold text-neutral-800">Loyalty Programs</Text>
-          <Text className="text-xs text-neutral-500">Drive retention & keep clients coming back</Text>
+        <Text style={{ flex: 1, fontSize: 22, fontWeight: '800', color: c.text }}>Loyalty Program</Text>
+        <Pressable hitSlop={8}>
+          <Info size={22} color={c.textMuted} />
+        </Pressable>
+      </View>
+
+      {/* Intro paragraph */}
+      <Text style={{ fontSize: 16, color: c.textMuted, textAlign: 'center', lineHeight: 26, paddingHorizontal: 28, marginTop: 16 }}>
+        Reward your clients for their loyalty. Create custom loyalty programs so clients can earn stamps and redeem them for a discount, free service, or product. Choose what works best for your business, including the final reward.
+      </Text>
+
+      {/* Illustration — framed in a full circular border */}
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
+        <View style={{
+          width: 280, height: 280, borderRadius: 140, overflow: 'hidden',
+          borderWidth: 4, borderColor: c.accent,
+          backgroundColor: c.surfaceAlt,
+          shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.15, shadowRadius: 14, elevation: 6,
+        }}>
+          <Image
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            source={require('../../assets/stamp_welcome.jpg')}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="cover"
+          />
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 16 }}>
-
-        {/* Intro banner */}
-        <View
-          className="rounded-2xl p-4"
-          style={{ backgroundColor: 'rgba(60,60,185,0.07)', borderWidth: 1, borderColor: 'rgba(60,60,185,0.1)' }}
-        >
-          <Text className="text-sm text-accent leading-5 font-medium">
-            Set up loyalty programs to reward your regular clients and fill empty appointment slots with smart promotions.
-          </Text>
-        </View>
-
-        {/* Flash Promos card */}
+      {/* Bottom CTA */}
+      <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: insets.bottom + 16 }}>
         <Pressable
-          onPress={() => router.push('/flash-promos' as any)}
-          style={{
-            backgroundColor: '#fff8ed',
-            borderRadius: 20,
-            borderWidth: 1,
-            borderColor: '#fde68a',
-            shadowColor: '#92400e',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.08,
-            shadowRadius: 8,
-            elevation: 3,
-            overflow: 'hidden',
-          }}
-          className="active:opacity-90"
+          onPress={handleEnable}
+          style={{ backgroundColor: c.isDark ? c.accent : '#1A202C', borderRadius: 16, paddingVertical: 18, alignItems: 'center' }}
         >
-          {/* Coloured top band */}
-          <View style={{ backgroundColor: '#F59E0B', paddingHorizontal: 20, paddingVertical: 18 }}>
-            <View className="flex-row items-center gap-3">
-              <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center' }}>
-                <Zap size={22} color="#ffffff" fill="#ffffff" />
-              </View>
-              <View className="flex-1">
-                <Text style={{ fontSize: 18, fontWeight: '800', color: '#ffffff' }}>Flash Promos</Text>
-                <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.85)', marginTop: 1 }}>Time-limited discounts</Text>
-              </View>
-              <ChevronRight size={20} color="rgba(255,255,255,0.8)" />
-            </View>
-          </View>
-
-          {/* Body */}
-          <View style={{ paddingHorizontal: 20, paddingVertical: 16 }}>
-            <Text style={{ fontSize: 13, color: '#92400e', lineHeight: 20 }}>
-              Create quick, time-limited discounts to fill empty slots. Clients browsing your profile will see active promos and book immediately.
-            </Text>
-            <View className="flex-row gap-2 mt-3 flex-wrap">
-              {['% Off', 'GHS Off', 'Multi-Service'].map((tag) => (
-                <View key={tag} style={{ backgroundColor: '#fef3c7', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#92400e' }}>{tag}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
+          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15, letterSpacing: 0.5 }}>ENABLE LOYALTY PROGRAM</Text>
         </Pressable>
-
-        {/* Stamp Cards card */}
-        <Pressable
-          onPress={() => router.push('/stamp-cards' as any)}
-          style={{
-            backgroundColor: '#f0f0ff',
-            borderRadius: 20,
-            borderWidth: 1,
-            borderColor: '#c7c7f5',
-            shadowColor: '#1e1b4b',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.08,
-            shadowRadius: 8,
-            elevation: 3,
-            overflow: 'hidden',
-          }}
-          className="active:opacity-90"
-        >
-          {/* Coloured top band */}
-          <View style={{ backgroundColor: '#3c3cb9', paddingHorizontal: 20, paddingVertical: 18 }}>
-            <View className="flex-row items-center gap-3">
-              <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
-                <Gift size={22} color="#ffffff" />
-              </View>
-              <View className="flex-1">
-                <Text style={{ fontSize: 18, fontWeight: '800', color: '#ffffff' }}>Stamp Cards</Text>
-                <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.85)', marginTop: 1 }}>Reward loyal clients</Text>
-              </View>
-              <ChevronRight size={20} color="rgba(255,255,255,0.8)" />
-            </View>
-          </View>
-
-          {/* Body */}
-          <View style={{ paddingHorizontal: 20, paddingVertical: 16 }}>
-            <Text style={{ fontSize: 13, color: '#312e81', lineHeight: 20 }}>
-              Digital punch cards where clients earn stamps per visit. When they hit your target, they unlock a free service or discount — your choice, your rules.
-            </Text>
-            <View className="flex-row gap-2 mt-3 flex-wrap">
-              {['Free Service', 'Discount Reward', 'No Commission'].map((tag) => (
-                <View key={tag} style={{ backgroundColor: '#e0e0ff', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#3c3cb9' }}>{tag}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        </Pressable>
-
-        {/* How it works blurb */}
-        <View
-          style={{
-            backgroundColor: '#fff',
-            borderRadius: 16,
-            borderWidth: 1,
-            borderColor: '#E2E8F0',
-            padding: 16,
-          }}
-        >
-          <Text style={{ fontSize: 12, fontWeight: '800', color: '#A0AEC0', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10 }}>
-            How it works
-          </Text>
-          {[
-            { step: '1', text: 'Choose a loyalty type and configure your rules.' },
-            { step: '2', text: 'Activate it — clients see your programs when browsing your profile.' },
-            { step: '3', text: 'Trimova tracks stamps & applies promos automatically at checkout.' },
-          ].map(({ step, text }) => (
-            <View key={step} className="flex-row gap-3 mb-3 items-start">
-              <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: '#3c3cb9', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>{step}</Text>
-              </View>
-              <Text style={{ flex: 1, fontSize: 13, color: '#4A5568', lineHeight: 19 }}>{text}</Text>
-            </View>
-          ))}
-        </View>
-
-      </ScrollView>
+      </View>
     </View>
   );
 }

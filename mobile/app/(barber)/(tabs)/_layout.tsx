@@ -1,17 +1,25 @@
 import { Platform } from 'react-native';
 import { Tabs } from 'expo-router';
 import { HomeIcon, CalendarCheck, Users, User } from 'lucide-react-native';
+import { useThemeColors } from '@/hooks/useThemeColors';
+import { useAuthStore } from '@/stores/authStore';
+import { useRefreshSignal } from '@/stores/refreshSignal';
+import type { BarberProfile } from '@/types/user';
 
 export default function BarberTabsLayout() {
+  const c = useThemeColors();
+  const { user } = useAuthStore();
+  // Freelance (mobile) barbers work solo — no staff management for them.
+  const isFreelance = (user as BarberProfile | null)?.barberType === 'mobile';
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#3c3cb9',
-        tabBarInactiveTintColor: '#A0AEC0',
+        tabBarActiveTintColor: c.accent,
+        tabBarInactiveTintColor: c.textFaint,
         tabBarStyle: {
-          backgroundColor: '#ffffff',
-          borderTopColor: '#F1F2F3',
+          backgroundColor: c.surface,
+          borderTopColor: c.border,
           borderTopWidth: 1,
           height: Platform.OS === 'ios' ? 84 : 62,
           paddingBottom: Platform.OS === 'ios' ? 24 : 8,
@@ -29,6 +37,12 @@ export default function BarberTabsLayout() {
           title: 'Home',
           tabBarIcon: ({ color }) => <HomeIcon   size={22} color={color} />,
         }}
+        // Only refresh when Home is pressed while already focused.
+        listeners={({ navigation }) => ({
+          tabPress: () => {
+            if (navigation.isFocused()) useRefreshSignal.getState().bumpBarberHome();
+          },
+        })}
       />
       <Tabs.Screen
         name="bookings"
@@ -42,6 +56,8 @@ export default function BarberTabsLayout() {
         options={{
           title: 'Staff',
           tabBarIcon: ({ color }) => <Users size={22} color={color} />,
+          // href: null removes the tab entirely for freelance barbers
+          href: isFreelance ? null : undefined,
         }}
       />
       <Tabs.Screen

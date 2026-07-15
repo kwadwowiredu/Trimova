@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Home, Search, Calendar, User } from 'lucide-react-native';
+import { useRefreshSignal } from '@/stores/refreshSignal';
 
 type TabIconProps = { color: string; size: number };
 
@@ -34,6 +35,13 @@ export default function ClientTabsLayout() {
             <Home size={size} color={color} />
           ),
         }}
+        // Instagram/TikTok behaviour: pressing Home only refreshes when the
+        // user is ALREADY on Home — not when switching over from another tab.
+        listeners={({ navigation }) => ({
+          tabPress: () => {
+            if (navigation.isFocused()) useRefreshSignal.getState().bumpClientHome();
+          },
+        })}
       />
       <Tabs.Screen
         name="search"

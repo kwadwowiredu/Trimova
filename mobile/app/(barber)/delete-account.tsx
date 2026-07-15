@@ -6,7 +6,6 @@ import {
   ScrollView,
   TextInput,
   Modal,
-  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -16,14 +15,17 @@ import {
   Eye,
   EyeOff,
   Trash2,
-  X,
 } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
+import { authService } from '@/services/auth';
+import { getApiErrorMessage } from '@/services/api';
+import { useThemeColors } from '@/hooks/useThemeColors';
 
 type Step = 1 | 2 | 3;
 
 export default function DeleteAccountScreen() {
   const insets    = useSafeAreaInsets();
+  const c = useThemeColors();
   const { logout } = useAuthStore();
 
   const [step,          setStep]          = useState<Step>(1);
@@ -32,22 +34,47 @@ export default function DeleteAccountScreen() {
   const [confirmText,   setConfirmText]   = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [showFinal,     setShowFinal]     = useState(false);
+  const [deleting,      setDeleting]      = useState(false);
+  const [verifying,     setVerifying]     = useState(false);
 
   const canProceedStep2 = password.length >= 6;
   const canProceedStep3 = confirmText === 'DELETE';
 
-  function handleStep2() {
-    if (!canProceedStep2) return;
-    // TODO: verify password against backend before advancing
-    // POST /api/auth/verify-password { password }
+  const dangerRing = c.isDark ? '#3A1B1B' : '#FED7D7';
+  const dangerTint = c.isDark ? '#241015' : '#FFF5F5';
+
+  // Verify the password against the backend BEFORE letting the user reach the
+  // "type DELETE" step, so a wrong password is caught immediately and clearly.
+  async function handleStep2() {
+    if (!canProceedStep2 || verifying) return;
+    setVerifying(true);
     setPasswordError('');
-    setStep(3);
+    try {
+      await authService.verifyPassword(password);
+      setVerifying(false);
+      setStep(3);
+    } catch (err) {
+      setVerifying(false);
+      setPasswordError(getApiErrorMessage(err));
+    }
   }
 
-  function handleFinalDelete() {
-    // TODO: DELETE /api/barber/account { password }
-    logout();
-    router.replace('/(auth)/login' as any);
+  async function handleFinalDelete() {
+    setDeleting(true);
+    try {
+      // Wipe the account + all owned data from the database.
+      await authService.deleteAccount(password);
+      // Clear the local (user-scoped) cache + token, then leave.
+      await logout();
+      router.replace('/(auth)/login' as any);
+    } catch (err) {
+      // Password was already verified at step 2, so this is most likely a
+      // connectivity/server problem — surface the real reason, don't blame the password.
+      setDeleting(false);
+      setShowFinal(false);
+      setStep(2);
+      setPasswordError(getApiErrorMessage(err));
+    }
   }
 
   const CONSEQUENCES = [
@@ -58,29 +85,31 @@ export default function DeleteAccountScreen() {
     'This action cannot be undone',
   ];
 
+  const cancelBtn = { borderRadius: 14, paddingVertical: 16, alignItems: 'center' as const, backgroundColor: c.surfaceAlt };
+
   return (
-    <View style={{ flex: 1, backgroundColor: '#FFF5F5', paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top }}>
 
       {/* Header */}
-      <View style={{ backgroundColor: '#fff', flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#f1f2f3' }}>
-        <Pressable onPress={() => router.back()} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#f1f2f3', alignItems: 'center', justifyContent: 'center' }}>
-          <ChevronLeft size={20} color="#4A5568" />
+      <View style={{ backgroundColor: c.surface, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: c.border }}>
+        <Pressable onPress={() => router.back()} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+          <ChevronLeft size={20} color={c.textMuted} />
         </Pressable>
-        <Text style={{ flex: 1, fontSize: 17, fontWeight: '700', color: '#E53E3E' }}>Delete Account</Text>
+        <Text style={{ flex: 1, fontSize: 17, fontWeight: '700', color: c.danger }}>Delete Account</Text>
       </View>
 
       {/* Step indicator */}
-      <View style={{ flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 14, gap: 8, alignItems: 'center', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f1f2f3' }}>
+      <View style={{ flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 14, gap: 8, alignItems: 'center', backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.border }}>
         {[1, 2, 3].map((s) => (
           <View key={s} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: s < 3 ? 6 : 0 }}>
             <View style={{
               width: 28, height: 28, borderRadius: 14,
-              backgroundColor: step >= s ? '#E53E3E' : '#f1f2f3',
+              backgroundColor: step >= s ? c.danger : c.surfaceAlt,
               alignItems: 'center', justifyContent: 'center',
             }}>
-              <Text style={{ fontSize: 12, fontWeight: '800', color: step >= s ? '#fff' : '#A0AEC0' }}>{s}</Text>
+              <Text style={{ fontSize: 12, fontWeight: '800', color: step >= s ? '#fff' : c.textFaint }}>{s}</Text>
             </View>
-            {s < 3 && <View style={{ flex: 1, height: 2, backgroundColor: step > s ? '#E53E3E' : '#f1f2f3', borderRadius: 1 }} />}
+            {s < 3 && <View style={{ flex: 1, height: 2, backgroundColor: step > s ? c.danger : c.surfaceAlt, borderRadius: 1 }} />}
           </View>
         ))}
       </View>
@@ -91,36 +120,36 @@ export default function DeleteAccountScreen() {
         {step === 1 && (
           <View>
             <View style={{ alignItems: 'center', marginVertical: 24 }}>
-              <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: '#FED7D7', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-                <AlertTriangle size={38} color="#E53E3E" />
+              <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: dangerRing, alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+                <AlertTriangle size={38} color={c.danger} />
               </View>
-              <Text style={{ fontSize: 22, fontWeight: '800', color: '#1A202C', textAlign: 'center', marginBottom: 8 }}>
+              <Text style={{ fontSize: 22, fontWeight: '800', color: c.text, textAlign: 'center', marginBottom: 8 }}>
                 This is permanent.
               </Text>
-              <Text style={{ fontSize: 14, color: '#718096', textAlign: 'center', lineHeight: 22 }}>
+              <Text style={{ fontSize: 14, color: c.textMuted, textAlign: 'center', lineHeight: 22 }}>
                 Deleting your account will immediately and irreversibly destroy your entire Trimova workspace.
               </Text>
             </View>
 
             {/* Consequences */}
-            <View style={{ backgroundColor: '#fff', borderRadius: 20, borderWidth: 1.5, borderColor: '#FED7D7', padding: 18, marginBottom: 24 }}>
-              <Text style={{ fontSize: 12, fontWeight: '800', color: '#E53E3E', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 14 }}>What will be destroyed</Text>
-              {CONSEQUENCES.map((c, i) => (
+            <View style={{ backgroundColor: c.surface, borderRadius: 20, borderWidth: 1.5, borderColor: dangerRing, padding: 18, marginBottom: 24 }}>
+              <Text style={{ fontSize: 12, fontWeight: '800', color: c.danger, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 14 }}>What will be destroyed</Text>
+              {CONSEQUENCES.map((item, i) => (
                 <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#E53E3E', marginTop: 6 }} />
-                  <Text style={{ flex: 1, fontSize: 13, color: '#4A5568', lineHeight: 20 }}>{c}</Text>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.danger, marginTop: 6 }} />
+                  <Text style={{ flex: 1, fontSize: 13, color: c.textMuted, lineHeight: 20 }}>{item}</Text>
                 </View>
               ))}
             </View>
 
             <Pressable
               onPress={() => setStep(2)}
-              style={{ backgroundColor: '#E53E3E', borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginBottom: 12 }}
+              style={{ backgroundColor: c.danger, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginBottom: 12 }}
             >
               <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>I understand — Continue</Text>
             </Pressable>
-            <Pressable onPress={() => router.back()} style={{ borderRadius: 14, paddingVertical: 16, alignItems: 'center', backgroundColor: '#f1f2f3' }}>
-              <Text style={{ color: '#4A5568', fontWeight: '700', fontSize: 15 }}>Cancel — Keep My Account</Text>
+            <Pressable onPress={() => router.back()} style={cancelBtn}>
+              <Text style={{ color: c.textMuted, fontWeight: '700', fontSize: 15 }}>Cancel — Keep My Account</Text>
             </Pressable>
           </View>
         )}
@@ -129,39 +158,39 @@ export default function DeleteAccountScreen() {
         {step === 2 && (
           <View>
             <View style={{ alignItems: 'center', marginVertical: 24 }}>
-              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#FED7D7', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: dangerRing, alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
                 <Text style={{ fontSize: 28 }}>🔐</Text>
               </View>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: '#1A202C', textAlign: 'center', marginBottom: 6 }}>Verify Your Identity</Text>
-              <Text style={{ fontSize: 13, color: '#718096', textAlign: 'center', lineHeight: 20 }}>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: c.text, textAlign: 'center', marginBottom: 6 }}>Verify Your Identity</Text>
+              <Text style={{ fontSize: 13, color: c.textMuted, textAlign: 'center', lineHeight: 20 }}>
                 Enter your current password to confirm this is really you.
               </Text>
             </View>
 
-            <View style={{ backgroundColor: '#fff', borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0', padding: 18, marginBottom: 24 }}>
-              <Text style={{ fontSize: 11, fontWeight: '800', color: '#A0AEC0', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 }}>Current Password</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F7FAFC', borderRadius: 12, paddingHorizontal: 14, borderWidth: 1.5, borderColor: passwordError ? '#E53E3E' : '#E2E8F0' }}>
+            <View style={{ backgroundColor: c.surface, borderRadius: 20, borderWidth: 1, borderColor: c.border, padding: 18, marginBottom: 24 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: c.textFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 }}>Current Password</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: c.surfaceAlt, borderRadius: 12, paddingHorizontal: 14, borderWidth: 1.5, borderColor: passwordError ? c.danger : c.border }}>
                 <TextInput
                   value={password} onChangeText={setPassword} placeholder="Enter your password"
-                  placeholderTextColor="#CBD5E0" secureTextEntry={!showPassword}
-                  style={{ flex: 1, paddingVertical: 13, fontSize: 14, color: '#1A202C' }}
+                  placeholderTextColor={c.textFaint} secureTextEntry={!showPassword}
+                  style={{ flex: 1, paddingVertical: 13, fontSize: 14, color: c.text }}
                 />
                 <Pressable onPress={() => setShowPassword((p) => !p)} hitSlop={8}>
-                  {showPassword ? <EyeOff size={18} color="#A0AEC0" /> : <Eye size={18} color="#A0AEC0" />}
+                  {showPassword ? <EyeOff size={18} color={c.textFaint} /> : <Eye size={18} color={c.textFaint} />}
                 </Pressable>
               </View>
-              {passwordError ? <Text style={{ color: '#E53E3E', fontSize: 11, marginTop: 4 }}>{passwordError}</Text> : null}
+              {passwordError ? <Text style={{ color: c.danger, fontSize: 11, marginTop: 4 }}>{passwordError}</Text> : null}
             </View>
 
             <Pressable
               onPress={handleStep2}
-              disabled={!canProceedStep2}
-              style={{ backgroundColor: canProceedStep2 ? '#E53E3E' : '#CBD5E0', borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginBottom: 12 }}
+              disabled={!canProceedStep2 || verifying}
+              style={{ backgroundColor: canProceedStep2 ? c.danger : c.textFaint, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginBottom: 12, opacity: verifying ? 0.6 : 1 }}
             >
-              <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>Verify & Continue</Text>
+              <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>{verifying ? 'Verifying…' : 'Verify & Continue'}</Text>
             </Pressable>
-            <Pressable onPress={() => setStep(1)} style={{ borderRadius: 14, paddingVertical: 16, alignItems: 'center', backgroundColor: '#f1f2f3' }}>
-              <Text style={{ color: '#4A5568', fontWeight: '700', fontSize: 15 }}>Go Back</Text>
+            <Pressable onPress={() => setStep(1)} style={cancelBtn}>
+              <Text style={{ color: c.textMuted, fontWeight: '700', fontSize: 15 }}>Go Back</Text>
             </Pressable>
           </View>
         )}
@@ -170,28 +199,28 @@ export default function DeleteAccountScreen() {
         {step === 3 && (
           <View>
             <View style={{ alignItems: 'center', marginVertical: 24 }}>
-              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#FED7D7', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
-                <Trash2 size={30} color="#E53E3E" />
+              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: dangerRing, alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+                <Trash2 size={30} color={c.danger} />
               </View>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: '#1A202C', textAlign: 'center', marginBottom: 6 }}>Final Confirmation</Text>
-              <Text style={{ fontSize: 13, color: '#718096', textAlign: 'center', lineHeight: 20, paddingHorizontal: 10 }}>
-                Type <Text style={{ fontWeight: '800', color: '#E53E3E' }}>DELETE</Text> in the field below to unlock the destruction button.
+              <Text style={{ fontSize: 20, fontWeight: '800', color: c.text, textAlign: 'center', marginBottom: 6 }}>Final Confirmation</Text>
+              <Text style={{ fontSize: 13, color: c.textMuted, textAlign: 'center', lineHeight: 20, paddingHorizontal: 10 }}>
+                Type <Text style={{ fontWeight: '800', color: c.danger }}>DELETE</Text> in the field below to unlock the destruction button.
               </Text>
             </View>
 
-            <View style={{ backgroundColor: '#fff', borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0', padding: 18, marginBottom: 24 }}>
-              <Text style={{ fontSize: 11, fontWeight: '800', color: '#A0AEC0', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 }}>Type "DELETE" to confirm</Text>
+            <View style={{ backgroundColor: c.surface, borderRadius: 20, borderWidth: 1, borderColor: c.border, padding: 18, marginBottom: 24 }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: c.textFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 }}>Type "DELETE" to confirm</Text>
               <TextInput
                 value={confirmText}
                 onChangeText={setConfirmText}
                 placeholder='Type DELETE here'
-                placeholderTextColor="#CBD5E0"
+                placeholderTextColor={c.textFaint}
                 autoCapitalize="characters"
                 style={{
-                  backgroundColor: confirmText === 'DELETE' ? '#FFF5F5' : '#F7FAFC',
+                  backgroundColor: confirmText === 'DELETE' ? dangerTint : c.surfaceAlt,
                   borderRadius: 12, paddingHorizontal: 14, paddingVertical: 13,
-                  fontSize: 18, fontWeight: '800', color: '#E53E3E', letterSpacing: 4,
-                  borderWidth: 1.5, borderColor: confirmText === 'DELETE' ? '#E53E3E' : '#E2E8F0',
+                  fontSize: 18, fontWeight: '800', color: c.danger, letterSpacing: 4,
+                  borderWidth: 1.5, borderColor: confirmText === 'DELETE' ? c.danger : c.border,
                   textAlign: 'center',
                 }}
               />
@@ -201,18 +230,16 @@ export default function DeleteAccountScreen() {
               onPress={() => setShowFinal(true)}
               disabled={!canProceedStep3}
               style={{
-                backgroundColor: canProceedStep3 ? '#E53E3E' : '#CBD5E0',
+                backgroundColor: canProceedStep3 ? c.danger : c.textFaint,
                 borderRadius: 14, paddingVertical: 16,
                 flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12,
-                shadowColor: canProceedStep3 ? '#E53E3E' : 'transparent',
-                shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: canProceedStep3 ? 4 : 0,
               }}
             >
               <Trash2 size={17} color="#fff" />
               <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>Confirm Permanent Destruction</Text>
             </Pressable>
-            <Pressable onPress={() => router.back()} style={{ borderRadius: 14, paddingVertical: 16, alignItems: 'center', backgroundColor: '#f1f2f3' }}>
-              <Text style={{ color: '#4A5568', fontWeight: '700', fontSize: 15 }}>Cancel — Keep My Account</Text>
+            <Pressable onPress={() => router.back()} style={cancelBtn}>
+              <Text style={{ color: c.textMuted, fontWeight: '700', fontSize: 15 }}>Cancel — Keep My Account</Text>
             </Pressable>
           </View>
         )}
@@ -221,22 +248,22 @@ export default function DeleteAccountScreen() {
       {/* Final confirmation modal */}
       <Modal visible={showFinal} animationType="fade" transparent onRequestClose={() => setShowFinal(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }} onPress={() => setShowFinal(false)}>
-          <Pressable style={{ backgroundColor: '#fff', borderRadius: 24, overflow: 'hidden', width: '100%' }} onPress={() => {}}>
-            <View style={{ backgroundColor: '#FFF5F5', alignItems: 'center', paddingVertical: 28 }}>
-              <View style={{ width: 70, height: 70, borderRadius: 35, backgroundColor: '#FED7D7', alignItems: 'center', justifyContent: 'center' }}>
-                <Trash2 size={32} color="#E53E3E" />
+          <Pressable style={{ backgroundColor: c.surface, borderRadius: 24, overflow: 'hidden', width: '100%' }} onPress={() => {}}>
+            <View style={{ backgroundColor: dangerTint, alignItems: 'center', paddingVertical: 28 }}>
+              <View style={{ width: 70, height: 70, borderRadius: 35, backgroundColor: dangerRing, alignItems: 'center', justifyContent: 'center' }}>
+                <Trash2 size={32} color={c.danger} />
               </View>
             </View>
             <View style={{ padding: 24, gap: 6 }}>
-              <Text style={{ fontSize: 18, fontWeight: '800', color: '#1A202C', textAlign: 'center' }}>Are you absolutely sure?</Text>
-              <Text style={{ fontSize: 13, color: '#718096', textAlign: 'center', lineHeight: 20 }}>
+              <Text style={{ fontSize: 18, fontWeight: '800', color: c.text, textAlign: 'center' }}>Are you absolutely sure?</Text>
+              <Text style={{ fontSize: 13, color: c.textMuted, textAlign: 'center', lineHeight: 20 }}>
                 This will permanently destroy your account, shop data, and remove all staff access. There is no going back.
               </Text>
-              <Pressable onPress={handleFinalDelete} style={{ backgroundColor: '#E53E3E', borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 16 }}>
-                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>Yes, Delete Everything</Text>
+              <Pressable onPress={handleFinalDelete} disabled={deleting} style={{ backgroundColor: c.danger, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 16, opacity: deleting ? 0.6 : 1 }}>
+                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>{deleting ? 'Deleting…' : 'Yes, Delete Everything'}</Text>
               </Pressable>
-              <Pressable onPress={() => setShowFinal(false)} style={{ backgroundColor: '#f1f2f3', borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 8 }}>
-                <Text style={{ color: '#4A5568', fontWeight: '700', fontSize: 15 }}>No, Keep My Account</Text>
+              <Pressable onPress={() => setShowFinal(false)} disabled={deleting} style={{ backgroundColor: c.surfaceAlt, borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 8 }}>
+                <Text style={{ color: c.textMuted, fontWeight: '700', fontSize: 15 }}>No, Keep My Account</Text>
               </Pressable>
             </View>
           </Pressable>

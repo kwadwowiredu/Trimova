@@ -19,9 +19,12 @@ api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    if (error.response?.status === 401) {
+    // Only clear the token when the SERVER says the token itself is bad.
+    // Endpoint-level 401s (e.g. a wrong password on verify/change/delete) must
+    // NOT log the user out.
+    const data = error.response?.data as { code?: string } | undefined;
+    if (error.response?.status === 401 && data?.code === 'TOKEN_INVALID') {
       await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
-      // authStore logout is triggered reactively via SecureStore change in root layout
     }
     return Promise.reject(error);
   }

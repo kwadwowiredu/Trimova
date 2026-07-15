@@ -30,6 +30,10 @@ export interface SearchBarbersParams {
   lat?: number;
   lng?: number;
   radius?: number;
+  /** Free-text query — matches barber names and business names. */
+  q?: string;
+  /** Barber-type filter; the API expects this as `type`. */
+  type?: 'barbershop' | 'mobile';
   service?: string;
   barberType?: 'barbershop' | 'mobile';
   minRating?: number;

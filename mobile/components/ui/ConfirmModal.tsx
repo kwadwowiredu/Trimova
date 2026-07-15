@@ -1,5 +1,6 @@
 import { View, Text, Pressable, Modal } from 'react-native';
 import { XCircle, AlertTriangle } from 'lucide-react-native';
+import { useThemeColors } from '@/hooks/useThemeColors';
 
 interface ConfirmModalProps {
   visible: boolean;
@@ -24,7 +25,15 @@ export function ConfirmModal({
   cancelLabel = 'Keep',
   variant = 'danger',
 }: ConfirmModalProps) {
+  const c = useThemeColors();
   const isDanger = variant === 'danger';
+
+  const bannerBg = isDanger
+    ? (c.isDark ? '#3A1B1B' : '#FFF5F5')
+    : (c.isDark ? '#3A2E12' : '#FFFBEB');
+  const iconRingBg = isDanger
+    ? (c.isDark ? '#5A2424' : '#FED7D7')
+    : (c.isDark ? '#5A4718' : '#FEEBC8');
 
   return (
     <Modal
@@ -42,22 +51,17 @@ export function ConfirmModal({
       >
         {/* Card — stop propagation so tapping inside doesn't close modal */}
         <Pressable
-          className="w-full bg-white rounded-3xl overflow-hidden"
+          className="w-full rounded-3xl overflow-hidden"
+          style={{ backgroundColor: c.surface }}
           onPress={() => { /* absorb tap */ }}
         >
           {/* ── Icon banner ──────────────────────────────────── */}
-          <View
-            className={`items-center py-8 ${isDanger ? 'bg-red-50' : 'bg-amber-50'}`}
-          >
-            <View
-              className={`w-[72px] h-[72px] rounded-full items-center justify-center ${
-                isDanger ? 'bg-red-100' : 'bg-amber-100'
-              }`}
-            >
+          <View style={{ alignItems: 'center', paddingVertical: 32, backgroundColor: bannerBg }}>
+            <View style={{ width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', backgroundColor: iconRingBg }}>
               {isDanger ? (
-                <XCircle size={36} color="#E53E3E" />
+                <XCircle size={36} color={c.danger} />
               ) : (
-                <AlertTriangle size={36} color="#D69E2E" />
+                <AlertTriangle size={36} color={c.warning} />
               )}
             </View>
           </View>
@@ -66,10 +70,10 @@ export function ConfirmModal({
           <View className="px-6 pt-5 pb-7 gap-5">
             {/* Title + message */}
             <View className="gap-2 items-center">
-              <Text className="text-[17px] font-bold text-neutral-800 text-center">
+              <Text style={{ fontSize: 17, fontWeight: '700', color: c.text, textAlign: 'center' }}>
                 {title}
               </Text>
-              <Text className="text-sm text-neutral-500 text-center leading-[21px]">
+              <Text style={{ fontSize: 14, color: c.textMuted, textAlign: 'center', lineHeight: 21 }}>
                 {message}
               </Text>
             </View>
@@ -78,9 +82,8 @@ export function ConfirmModal({
             <View className="gap-3">
               <Pressable
                 onPress={onConfirm}
-                className={`py-4 rounded-2xl items-center active:opacity-75 ${
-                  isDanger ? 'bg-danger' : 'bg-warning'
-                }`}
+                className="py-4 rounded-2xl items-center active:opacity-75"
+                style={{ backgroundColor: isDanger ? c.danger : c.warning }}
               >
                 <Text className="text-white font-bold text-[15px]">
                   {confirmLabel}
@@ -89,9 +92,10 @@ export function ConfirmModal({
 
               <Pressable
                 onPress={onClose}
-                className="py-4 rounded-2xl items-center active:opacity-75 bg-neutral-100"
+                className="py-4 rounded-2xl items-center active:opacity-75"
+                style={{ backgroundColor: c.surfaceAlt }}
               >
-                <Text className="text-neutral-700 font-semibold text-[15px]">
+                <Text style={{ fontSize: 15, fontWeight: '600', color: c.text }}>
                   {cancelLabel}
                 </Text>
               </Pressable>

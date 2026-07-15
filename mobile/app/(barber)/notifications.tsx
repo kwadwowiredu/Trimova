@@ -3,6 +3,7 @@ import { View, Text, Pressable, Switch, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ChevronLeft, Bell, Calendar, Star, Megaphone, DollarSign } from 'lucide-react-native';
+import { useThemeColors } from '@/hooks/useThemeColors';
 
 interface NotifSetting {
   id: string;
@@ -14,6 +15,7 @@ interface NotifSetting {
 
 export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
+  const c = useThemeColors();
 
   const [settings, setSettings] = useState<NotifSetting[]>([
     { id: 'new_booking',   icon: <Calendar  size={17} color="#3c3cb9" />, label: 'New Bookings',         subtitle: 'When a client books an appointment',         enabled: true  },
@@ -35,19 +37,22 @@ export default function NotificationsScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F5F6F8', paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: c.bg, paddingTop: insets.top }}>
 
-      <View style={{ backgroundColor: '#fff', flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#f1f2f3' }}>
-        <Pressable onPress={() => router.back()} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#f1f2f3', alignItems: 'center', justifyContent: 'center' }}>
-          <ChevronLeft size={20} color="#4A5568" />
+      <View style={{ backgroundColor: c.surface, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: c.border }}>
+        <Pressable onPress={() => router.back()} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
+          <ChevronLeft size={20} color={c.textMuted} />
         </Pressable>
-        <Text style={{ flex: 1, fontSize: 17, fontWeight: '700', color: '#1A202C' }}>Push Notifications</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: c.text }}>Push Notifications</Text>
+          <Text style={{ fontSize: 11, color: c.textFaint, marginTop: 1 }}>Manage notification preferences</Text>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
 
         {/* Master toggle */}
-        <View style={{ backgroundColor: '#3c3cb9', borderRadius: 20, padding: 16, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <View style={{ backgroundColor: c.accent, borderRadius: 20, padding: 16, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
             <Bell size={20} color="#ffffff" />
           </View>
@@ -65,27 +70,27 @@ export default function NotificationsScreen() {
         </View>
 
         {/* Per-category toggles */}
-        <Text style={{ fontSize: 11, fontWeight: '800', color: '#A0AEC0', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10, marginLeft: 2 }}>
+        <Text style={{ fontSize: 11, fontWeight: '800', color: c.textFaint, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10, marginLeft: 2 }}>
           Categories
         </Text>
-        <View style={{ backgroundColor: '#fff', borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', shadowColor: '#1A202C', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 }}>
+        <View style={{ backgroundColor: c.surface, borderRadius: 20, borderWidth: 1, borderColor: c.border, overflow: 'hidden' }}>
           {settings.map((s, i) => (
             <View key={s.id}>
-              {i > 0 && <View style={{ height: 1, backgroundColor: '#f1f2f3', marginHorizontal: 16 }} />}
+              {i > 0 && <View style={{ height: 1, backgroundColor: c.border, marginHorizontal: 16 }} />}
               <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, gap: 14 }}>
-                <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#f1f2f3', alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>
                   {s.icon}
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#1A202C' }}>{s.label}</Text>
-                  <Text style={{ fontSize: 12, color: '#A0AEC0', marginTop: 1 }}>{s.subtitle}</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: c.text }}>{s.label}</Text>
+                  <Text style={{ fontSize: 12, color: c.textFaint, marginTop: 1 }}>{s.subtitle}</Text>
                 </View>
                 <Switch
                   value={s.enabled}
                   onValueChange={(val) => toggle(s.id, val)}
-                  trackColor={{ false: '#CBD5E0', true: '#3c3cb9' }}
+                  trackColor={{ false: c.border, true: c.accent }}
                   thumbColor="#ffffff"
-                  ios_backgroundColor="#CBD5E0"
+                  ios_backgroundColor={c.border}
                 />
               </View>
             </View>

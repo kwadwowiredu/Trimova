@@ -2,6 +2,7 @@ import { View, Text, Pressable } from 'react-native';
 import { Calendar, MapPin, CheckCircle2, Circle } from 'lucide-react-native';
 import { format, isToday, isTomorrow } from 'date-fns';
 import { Avatar } from '@/components/ui/Avatar';
+import { useThemeColors } from '@/hooks/useThemeColors';
 
 export type BookingStatus = 'confirmed' | 'pending' | 'completed' | 'cancelled';
 
@@ -23,14 +24,20 @@ interface BookingCardProps {
   isSelectionMode?: boolean;
   onLongPress?: (id: string) => void;
   onPress?: (id: string) => void;
+  /** Freelance barbers must accept requests — when provided (and the booking is
+   *  pending) the card shows Accept / Decline actions. */
+  onAccept?: (id: string) => void;
+  onDecline?: (id: string) => void;
 }
 
-const STATUS_CONFIG: Record<BookingStatus, { label: string; bg: string; text: string }> = {
-  confirmed: { label: 'Confirmed', bg: '#FFF3DC', text: '#B7791F' },
-  pending:   { label: 'Pending',   bg: '#EBF4FF', text: '#2B6CB0' },
-  completed: { label: 'Completed', bg: '#F0FFF4', text: '#276749' },
-  cancelled: { label: 'Cancelled', bg: '#FFF5F5', text: '#C53030' },
-};
+function statusConfig(isDark: boolean): Record<BookingStatus, { label: string; bg: string; text: string }> {
+  return {
+    confirmed: { label: 'Confirmed', bg: isDark ? '#3A2E12' : '#FFF3DC', text: isDark ? '#F6C36B' : '#B7791F' },
+    pending:   { label: 'Pending',   bg: isDark ? '#1E2A40' : '#EBF4FF', text: isDark ? '#90CDF4' : '#2B6CB0' },
+    completed: { label: 'Completed', bg: isDark ? '#16271C' : '#F0FFF4', text: isDark ? '#68D391' : '#276749' },
+    cancelled: { label: 'Cancelled', bg: isDark ? '#3A1B1B' : '#FFF5F5', text: isDark ? '#FC8181' : '#C53030' },
+  };
+}
 
 function formatDate(iso: string): string {
   const date = new Date(iso);
@@ -45,46 +52,39 @@ export function BookingCard({
   isSelectionMode = false,
   onLongPress,
   onPress,
+  onAccept,
+  onDecline,
 }: BookingCardProps) {
-  const status = STATUS_CONFIG[booking.status];
+  const c = useThemeColors();
+  const status = statusConfig(c.isDark)[booking.status];
+  const cardBg = isSelected ? c.accentSoft : c.surface;
+  const showRequestActions = booking.status === 'pending' && !!onAccept && !isSelectionMode;
 
   return (
-    /*
-      SHADOW PATTERN:
-      • Outer Pressable = shadow host (no overflow-hidden so iOS shadow bleeds outside)
-      • borderColor #E2E8F0 is visibly darker than the page bg #F5F6F8
-        — neutral-100 (#f1f2f3) was lighter than the background, making it invisible.
-      • Explicit shadowOpacity / elevation instead of NativeWind shadow-sm
-        (shadow-sm maps to near-zero opacity values in React Native).
-      • Inner View = overflow-hidden + rounded corners to clip content.
-    */
     <Pressable
       onLongPress={() => onLongPress?.(booking.id)}
       onPress={() => isSelectionMode && onPress?.(booking.id)}
       delayLongPress={380}
       style={{
-        backgroundColor: isSelected ? '#EEEEFC' : '#ffffff',
+        backgroundColor: cardBg,
         borderRadius: 16,
         borderWidth: 1,
-        borderColor: isSelected ? '#C7C7F5' : '#E2E8F0',
-        shadowColor: '#1A202C',
+        borderColor: isSelected ? c.accent : c.border,
+        shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
+        shadowOpacity: c.isDark ? 0.25 : 0.08,
         shadowRadius: 8,
         elevation: 3,
       }}
     >
       {/* Clip container */}
-      <View
-        className="rounded-2xl overflow-hidden"
-        style={{ backgroundColor: isSelected ? '#EEEEFC' : '#ffffff' }}
-      >
+      <View className="rounded-2xl overflow-hidden" style={{ backgroundColor: cardBg }}>
         {/* Checkbox in selection mode */}
         {isSelectionMode && (
           <View className="absolute top-3.5 right-3.5 z-10">
             {isSelected
-              ? <CheckCircle2 size={22} color="#3c3cb9" />
-              : <Circle      size={22} color="#CBD5E0" />
+              ? <CheckCircle2 size={22} color={c.accent} />
+              : <Circle      size={22} color={c.textFaint} />
             }
           </View>
         )}
@@ -96,20 +96,17 @@ export function BookingCard({
             <Avatar uri={booking.clientAvatar} name={booking.clientName} size={46} />
 
             <View className="flex-1" style={{ paddingRight: isSelectionMode ? 30 : 0 }}>
-              <Text className="text-sm font-bold text-neutral-800" numberOfLines={1}>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>
                 {booking.clientName}
               </Text>
-              <Text className="text-xs text-neutral-500 mt-0.5" numberOfLines={1}>
+              <Text style={{ fontSize: 12, color: c.textMuted, marginTop: 2 }} numberOfLines={1}>
                 {booking.serviceName}
               </Text>
             </View>
 
             {!isSelectionMode && (
-              <View
-                style={{ backgroundColor: status.bg }}
-                className="rounded-full px-3 py-1 self-start"
-              >
-                <Text style={{ color: status.text }} className="text-xs font-bold">
+              <View style={{ backgroundColor: status.bg }} className="rounded-full px-3 py-1 self-start">
+                <Text style={{ color: status.text, fontSize: 12, fontWeight: '700' }}>
                   {status.label}
                 </Text>
               </View>
@@ -117,23 +114,43 @@ export function BookingCard({
           </View>
 
           {/* Divider */}
-          <View className="h-px bg-neutral-100 my-3" />
+          <View style={{ height: 1, backgroundColor: c.border, marginVertical: 12 }} />
 
           {/* Date + location */}
           <View className="flex-row gap-4">
             <View className="flex-row items-center gap-1.5 flex-1">
-              <Calendar size={13} color="#A0AEC0" />
-              <Text className="text-xs text-neutral-800 flex-shrink" numberOfLines={1}>
+              <Calendar size={13} color={c.textFaint} />
+              <Text style={{ fontSize: 12, color: c.textMuted, flexShrink: 1 }} numberOfLines={1}>
                 {formatDate(booking.startTime)}
               </Text>
             </View>
             <View className="flex-row items-center gap-1.5 flex-1">
-              <MapPin size={13} color="#A0AEC0" />
-              <Text className="text-xs text-neutral-800 flex-shrink" numberOfLines={1}>
+              <MapPin size={13} color={c.textFaint} />
+              <Text style={{ fontSize: 12, color: c.textMuted, flexShrink: 1 }} numberOfLines={1}>
                 {booking.locationAddress}
               </Text>
             </View>
           </View>
+
+          {/* Accept / Decline — freelance request flow */}
+          {showRequestActions && (
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+              <Pressable
+                onPress={() => onAccept?.(booking.id)}
+                style={{ flex: 1, backgroundColor: c.accent, borderRadius: 12, paddingVertical: 11, alignItems: 'center' }}
+                className="active:opacity-80"
+              >
+                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>Accept</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => onDecline?.(booking.id)}
+                style={{ flex: 1, borderRadius: 12, paddingVertical: 11, alignItems: 'center', borderWidth: 1.5, borderColor: c.danger }}
+                className="active:opacity-80"
+              >
+                <Text style={{ color: c.danger, fontSize: 13, fontWeight: '700' }}>Decline</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       </View>
     </Pressable>

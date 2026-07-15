@@ -1,23 +1,33 @@
 import { api } from './api';
 import type { ApiResponse } from '@/types/api';
-import type { Service, CreateServicePayload, UpdateServicePayload } from '@/types/service';
+
+/** Service shape returned by the API (matches the Services screen). */
+export interface ApiService {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  durationMins: number;
+  isActive: boolean;
+}
+
+export interface ServiceInput {
+  name: string;
+  description: string;
+  price: number;
+  durationMins: number;
+}
 
 export const servicesService = {
-  getBarberServices: (barberId: string) =>
-    api.get<ApiResponse<Service[]>>(`/barbers/${barberId}/services`),
+  getMine: () =>
+    api.get<ApiResponse<ApiService[]>>('/services/me'),
 
-  getMyServices: () =>
-    api.get<ApiResponse<Service[]>>('/services/me'),
+  create: (payload: ServiceInput) =>
+    api.post<ApiResponse<ApiService>>('/services', payload),
 
-  create: (payload: CreateServicePayload) =>
-    api.post<ApiResponse<Service>>('/services', payload),
+  update: (id: string, payload: Partial<ServiceInput>) =>
+    api.put<ApiResponse<ApiService>>(`/services/${id}`, payload),
 
-  update: (id: string, payload: UpdateServicePayload) =>
-    api.put<ApiResponse<Service>>(`/services/${id}`, payload),
-
-  delete: (id: string) =>
+  remove: (id: string) =>
     api.delete<ApiResponse<null>>(`/services/${id}`),
-
-  toggleActive: (id: string) =>
-    api.patch<ApiResponse<Service>>(`/services/${id}/toggle`),
 };

@@ -10,6 +10,8 @@ export interface User {
   role: UserRole;
   avatarUrl: string | null;
   createdAt: string;
+  /** FALSE until the user has explicitly chosen a role on role-selection. */
+  roleSelected?: boolean;
 }
 
 export interface ClientProfile extends User {
@@ -21,6 +23,7 @@ export interface BarberProfile extends User {
   barberType: BarberType;
   businessName: string;
   bio: string | null;
+  coverPhotoUrl: string | null;
   rating: number;
   reviewCount: number;
   isVerified: boolean;
@@ -69,6 +72,11 @@ export interface BarberListItem {
   serviceRadius: number | null;
   locationAddress: string | null;
   portfolioImages: string[];
+  /** Shop cover banner — used on client-facing barber cards. */
+  coverPhotoUrl?: string | null;
+  /** Map-pin coordinates for the client Search map. */
+  lat?: number | null;
+  lng?: number | null;
   distance?: number;
 }
 

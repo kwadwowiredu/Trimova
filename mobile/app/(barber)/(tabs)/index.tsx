@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,15 @@ import { Bell, Plus, X, Clock, Info } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import type { BarberProfile } from '@/types/user';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { CompleteProfileBanner, isProfileIncomplete } from '@/components/barber/CompleteProfileBanner';
+import { useRefreshSignal } from '@/stores/refreshSignal';
+import { workingHoursService, type DaySchedule } from '@/services/workingHours';
+
+// Turn "HH:MM" into a fractional hour (e.g. "09:30" → 9.5).
+function toHourFloat(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return (h || 0) + (m || 0) / 60;
+}
 
 // ─── Event types ──────────────────────────────────────────────────────────────
 
@@ -406,24 +415,24 @@ function BreakModal({
           style={{ backgroundColor: 'rgba(60,60,185,0.07)' }}
         >
           <Info size={16} color="#3c3cb9" style={{ marginTop: 1 }} />
-          <Text className="flex-1 text-sm text-accent leading-[20px]">
+          <Text className="flex-1 text-sm text-[#003049] leading-[20px]">
             Setting a break prevents clients from booking you during this time window.
           </Text>
         </View>
 
         {/* Start time label */}
-        <Text className="text-[11px] font-bold text-neutral-400 tracking-widest ml-5 mb-2 uppercase">
+        <Text className="text-[11px] font-bold text-neutral-400 tracking-widest ml-5 uppercase">
           Start time
         </Text>
 
         {/* Wheel picker — hours : minutes  AM/PM */}
-        <View className="flex-row items-center px-5 mb-5">
+        <View className="flex-row items-center px-5 mb-1">
           <View className="flex-1">
             <WheelColumn items={HOURS_12} selectedIndex={hourIdx} onChange={setHourIdx} />
           </View>
           <Text
             style={{
-              fontSize: 26, fontWeight: '300',
+              fontSize: 26, fontWeight: '500',
               color: '#CBD5E0', paddingBottom: 4,
               marginHorizontal: 4,
             }}
@@ -451,12 +460,12 @@ function BreakModal({
             <Pressable
               key={d}
               onPress={() => setDuration(d)}
-              className={`flex-1 py-2.5 rounded-2xl items-center ${
+              className={`flex-1 py-2.5 rounded-sm items-center ${
                 duration === d ? 'bg-accent' : 'bg-neutral-100'
               }`}
             >
               <Text
-                className={`text-sm font-bold ${duration === d ? 'text-white' : 'text-neutral-500'}`}
+                className={`text-sm font-bold ${duration === d ? 'text-white' : 'text-neutral-600'}`}
               >
                 {d >= 60 ? `${d / 60}h` : `${d}m`}
               </Text>
@@ -465,7 +474,7 @@ function BreakModal({
         </View>
 
         <Pressable
-          className="flex-row items-center justify-center gap-2 bg-accent rounded-full mx-5 py-4 active:opacity-80"
+          className="flex-row items-center justify-center gap-2 bg-accent rounded-2xl mx-5 py-4 active:opacity-80"
           onPress={handleAdd}
         >
           <Clock size={16} color="white" />
@@ -514,12 +523,41 @@ export default function BarberHomeScreen() {
   const [breaks, setBreaks]                 = useState<ScheduleEvent[]>([]);
   const [showBreakModal, setShowBreakModal] = useState(false);
   const [breakToDelete, setBreakToDelete]   = useState<ScheduleEvent | null>(null);
+  const [schedule, setSchedule]             = useState<DaySchedule[] | null>(null);
+
+  const showBanner = isProfileIncomplete(barber);
+
+  // Load this barber's saved working hours so the header + timeline reflect them.
+  const loadSchedule = useCallback(async () => {
+    try {
+      const res = await workingHoursService.getMine();
+      setSchedule(res.data.data && res.data.data.length ? res.data.data : null);
+    } catch {
+      setSchedule(null);
+    }
+  }, []);
+  useEffect(() => { loadSchedule(); }, [loadSchedule]);
+
+  // Tap the Home tab → jump back to today and re-pull the schedule.
+  const barberHomeNonce = useRefreshSignal((s) => s.barberHome);
+  useEffect(() => {
+    if (barberHomeNonce === 0) return;
+    setSelectedDate(new Date());
+    loadSchedule();
+  }, [barberHomeNonce, loadSchedule]);
+
+  // Hours for the day being viewed (falls back to a sensible default pre-setup).
+  const daySchedule = schedule?.find((d) => d.day === format(selectedDate, 'EEEE'));
+  const isClosedDay = daySchedule ? !daySchedule.isOpen : false;
+  const openHour  = daySchedule?.isOpen ? Math.floor(toHourFloat(daySchedule.openTime))       : OPEN_HOUR;
+  const closeHour = daySchedule?.isOpen ? Math.ceil(toHourFloat(daySchedule.closeTime))        : CLOSE_HOUR;
 
   // ── Layout calculations ──────────────────────────────────────────────────────
   const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? 84 : 62;
   const HEADER_HEIGHT  = 90;
   const WEEK_HEIGHT    = 72;
-  const calendarHeight = screenHeight - insets.top - HEADER_HEIGHT - WEEK_HEIGHT - TAB_BAR_HEIGHT;
+  const BANNER_HEIGHT  = showBanner ? 52 : 0;
+  const calendarHeight = screenHeight - insets.top - HEADER_HEIGHT - WEEK_HEIGHT - TAB_BAR_HEIGHT - BANNER_HEIGHT;
 
   // Initial scroll: show ~1 hr of context before current time on today;
   // for other dates start just before opening hour.
@@ -528,23 +566,30 @@ export default function BarberHomeScreen() {
   const isViewingToday = isSameDay(selectedDate, new Date());
   const scrollMinutes  = isViewingToday
     ? Math.max(0, nowMinutes - 60)
-    : Math.max(0, OPEN_HOUR * 60 - 60);
+    : Math.max(0, openHour * 60 - 60);
 
   // Re-mounting BigCalendar on date change resets the scroll position correctly.
   const calendarKey = selectedDate.toDateString();
 
   const events       = toScheduleEvents(MOCK_DB_APPOINTMENTS, breaks);
   const businessName = barber?.businessName ?? 'My Barbershop';
-  const workingHours = `${OPEN_HOUR}:00 – ${CLOSE_HOUR}:00`;
+  const workingHours = isClosedDay
+    ? 'Closed'
+    : daySchedule?.isOpen
+      ? `${daySchedule.openTime} – ${daySchedule.closeTime}`
+      : `${OPEN_HOUR}:00 – ${CLOSE_HOUR}:00`;
 
   return (
     <View className="flex-1 bg-white">
+
+      {/* ── Complete-profile banner (very top, full width, static) ── */}
+      <CompleteProfileBanner insetTop={insets.top} />
 
       {/* ── Purple decorative header ─────────────────────────── */}
       <View
         style={{
           backgroundColor: '#2D27A8',
-          paddingTop:       insets.top,
+          paddingTop:       showBanner ? 0 : insets.top,
           overflow:         'hidden',
         }}
       >
@@ -602,7 +647,7 @@ export default function BarberHomeScreen() {
           bodyContainerStyle={{ backgroundColor: '#ffffff' }}
           calendarCellStyle={(date) => ({
             backgroundColor:
-              date && (date.getHours() < OPEN_HOUR || date.getHours() >= CLOSE_HOUR)
+              isClosedDay || (date && (date.getHours() < openHour || date.getHours() >= closeHour))
                 ? '#F9FAFB'
                 : 'transparent',
           })}

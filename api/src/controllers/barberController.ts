@@ -17,6 +17,9 @@ interface RawBarberRow {
   service_radius_km: number | null;
   location_address: string | null;
   portfolio_images: string[];
+  cover_photo_url?: string | null;
+  lat?: number | null;
+  lng?: number | null;
   distance_km: string | number | null;
   total_count: string | number;
 }
@@ -35,6 +38,12 @@ function mapListItem(row: RawBarberRow) {
     serviceRadius: row.service_radius_km,
     locationAddress: row.location_address,
     portfolioImages: row.portfolio_images || [],
+    // Undefined until migration 008 updates the search RPC — clients fall back
+    // to the first portfolio image, then a gradient.
+    coverPhotoUrl: row.cover_photo_url ?? null,
+    // Map-pin coordinates (also from migration 008).
+    lat: row.lat ?? null,
+    lng: row.lng ?? null,
     distance:
       row.distance_km != null
         ? parseFloat(String(row.distance_km))
@@ -243,15 +252,40 @@ export const barberController = {
         return sendError(res, 'Barber profile not found', 404);
       }
 
-      const { data: services } = await supabase
-        .from('services')
-        .select('id, name, description, price, duration_minutes, is_active')
-        .eq('barber_id', id)
-        .eq('is_active', true)
-        .order('price', { ascending: true });
+      const [{ data: services }, { data: hours }] = await Promise.all([
+        supabase
+          .from('services')
+          .select('id, name, description, price, duration_minutes, is_active')
+          .eq('barber_id', id)
+          .eq('is_active', true)
+          .order('price', { ascending: true }),
+        supabase
+          .from('working_hours')
+          .select('day_of_week, start_time, end_time, is_active')
+          .eq('barber_id', id),
+      ]);
 
       const u = userResult.data;
       const p = profileResult.data;
+
+      // Mon→Sun opening times for the client "About" tab (dow 0=Sun..6=Sat).
+      const DAY_ORDER = [
+        { day: 'Monday', dow: 1 }, { day: 'Tuesday', dow: 2 }, { day: 'Wednesday', dow: 3 },
+        { day: 'Thursday', dow: 4 }, { day: 'Friday', dow: 5 }, { day: 'Saturday', dow: 6 },
+        { day: 'Sunday', dow: 0 },
+      ];
+      const hhmm = (t: unknown) => String(t ?? '').slice(0, 5);
+      const workingHours = (hours && hours.length > 0)
+        ? DAY_ORDER.map(({ day, dow }) => {
+            const wh = hours.find((h) => h.day_of_week === dow);
+            return {
+              day,
+              isOpen:    wh ? !!wh.is_active : false,
+              openTime:  wh ? hhmm(wh.start_time) : '09:00',
+              closeTime: wh ? hhmm(wh.end_time)   : '18:00',
+            };
+          })
+        : null;
 
       sendSuccess(res, {
         id:               u.id,
@@ -272,6 +306,8 @@ export const barberController = {
         serviceRadius:    p.service_radius_km,
         locationAddress:  p.location_address,
         portfolioImages:  p.portfolio_images || [],
+        coverPhotoUrl:    p.cover_photo_url ?? null,
+        workingHours,
         services: (services || []).map((s) => ({
           id:              s.id,
           name:            s.name,

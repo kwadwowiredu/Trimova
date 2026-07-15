@@ -10,11 +10,13 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import MapView, { type Region } from 'react-native-maps';
+import MapView, { Circle, type Region } from 'react-native-maps';
 import { GooglePlacesAutocomplete, type GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 import * as Location from 'expo-location';
 import { MapPin, Navigation } from 'lucide-react-native';
 import { useOnboardingStore } from '@/stores/onboardingStore';
+import { RadiusSlider } from '@/components/ui/RadiusSlider';
+import { MIN_RADIUS_KM, MAX_RADIUS_KM } from '@/utils/constants';
 
 // Default coordinates — Accra, Ghana
 const DEFAULT_REGION: Region = {
@@ -28,34 +30,51 @@ const MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY ?? '';
 
 export default function LocationPickerScreen() {
   const insets = useSafeAreaInsets();
-  const { setLocation } = useOnboardingStore();
+  const { setLocation, barberType, serviceRadius, setServiceRadius } = useOnboardingStore();
   const placesRef = useRef<GooglePlacesAutocompleteRef>(null);
+
+  // Freelance (mobile) barbers set a base + travel radius; shops just pin an address.
+  const isFreelance = barberType === 'mobile';
 
   const [region, setRegion] = useState<Region>(DEFAULT_REGION);
   const [selectedAddress, setSelectedAddress] = useState('');
   const [isReversing, setIsReversing] = useState(false);
-  const reverseTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reverseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Last coordinate we actually looked up — used to skip near-duplicate lookups
+  // that would otherwise hammer the OS geocoder and trip its rate limit.
+  const lastGeocoded = useRef<{ lat: number; lng: number } | null>(null);
 
-  // Debounced reverse-geocode when the map stops moving
-  const handleRegionChangeComplete = useCallback(async (newRegion: Region) => {
+  async function reverseGeocode(lat: number, lng: number) {
+    // Skip if we've barely moved (< ~30m) since the last successful lookup.
+    const last = lastGeocoded.current;
+    if (last && Math.abs(last.lat - lat) < 0.0003 && Math.abs(last.lng - lng) < 0.0003) return;
+    try {
+      const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+      if (results.length > 0) {
+        const { district, city, region: regionName, country } = results[0];
+        const parts = [district, city, regionName].filter(Boolean);
+        setSelectedAddress(parts.length > 0 ? parts.join(', ') : country ?? 'Unknown location');
+        lastGeocoded.current = { lat, lng };
+      }
+    } catch {
+      // Geocoder busy / rate-limited / offline — keep the last known address and
+      // fall back to coordinates if we don't have one yet. Never crash the map.
+      setSelectedAddress((prev) => prev || `${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+    } finally {
+      setIsReversing(false);
+    }
+  }
+
+  // Debounced reverse-geocode when the map stops moving. A longer debounce keeps
+  // us well under the platform geocoder's request-rate limit.
+  const handleRegionChangeComplete = useCallback((newRegion: Region) => {
     setRegion(newRegion);
     clearTimeout(reverseTimer.current);
     setIsReversing(true);
-    reverseTimer.current = setTimeout(async () => {
-      try {
-        const results = await Location.reverseGeocodeAsync({
-          latitude: newRegion.latitude,
-          longitude: newRegion.longitude,
-        });
-        if (results.length > 0) {
-          const { district, city, region: regionName, country } = results[0];
-          const parts = [district, city, regionName].filter(Boolean);
-          setSelectedAddress(parts.length > 0 ? parts.join(', ') : country ?? 'Unknown location');
-        }
-      } finally {
-        setIsReversing(false);
-      }
-    }, 500);
+    reverseTimer.current = setTimeout(() => {
+      reverseGeocode(newRegion.latitude, newRegion.longitude);
+    }, 900);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Use device GPS
@@ -71,13 +90,8 @@ export default function LocationPickerScreen() {
       const { latitude, longitude } = pos.coords;
       const newRegion: Region = { latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 };
       setRegion(newRegion);
-
-      const results = await Location.reverseGeocodeAsync({ latitude, longitude });
-      if (results.length > 0) {
-        const { district, city, region: regionName } = results[0];
-        setSelectedAddress([district, city, regionName].filter(Boolean).join(', '));
-      }
-    } finally {
+      await reverseGeocode(latitude, longitude);
+    } catch {
       setIsReversing(false);
     }
   }
@@ -100,7 +114,18 @@ export default function LocationPickerScreen() {
         onRegionChangeComplete={handleRegionChangeComplete}
         showsUserLocation
         showsMyLocationButton={false}
-      />
+      >
+        {/* Freelancers see their travel radius drawn live on the map */}
+        {isFreelance && (
+          <Circle
+            center={{ latitude: region.latitude, longitude: region.longitude }}
+            radius={serviceRadius * 1000}
+            strokeColor="rgba(60,60,185,0.6)"
+            strokeWidth={2}
+            fillColor="rgba(60,60,185,0.12)"
+          />
+        )}
+      </MapView>
 
       {/* Centered pin overlay — stays fixed while map moves */}
       <View style={styles.pinContainer} pointerEvents="none">
@@ -193,7 +218,9 @@ export default function LocationPickerScreen() {
         {/* Selected location label */}
         {(selectedAddress || isReversing) && (
           <View style={styles.selectedLocationContainer}>
-            <Text style={styles.selectedLocationLabel}>SELECTED LOCATION</Text>
+            <Text style={styles.selectedLocationLabel}>
+              {isFreelance ? 'YOUR BASE LOCATION' : 'SELECTED LOCATION'}
+            </Text>
             {isReversing ? (
               <ActivityIndicator size="small" color="#3c3cb9" style={{ marginTop: 4 }} />
             ) : (
@@ -201,6 +228,19 @@ export default function LocationPickerScreen() {
                 {selectedAddress}
               </Text>
             )}
+          </View>
+        )}
+
+        {/* Freelancers: how far they're willing to travel from base */}
+        {isFreelance && (
+          <View style={{ marginBottom: 14 }}>
+            <RadiusSlider
+              value={serviceRadius}
+              onChange={setServiceRadius}
+              min={MIN_RADIUS_KM}
+              max={MAX_RADIUS_KM}
+              label="Willing to travel"
+            />
           </View>
         )}
 

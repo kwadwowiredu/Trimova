@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -24,9 +24,12 @@ import {
   Trash2,
   CheckSquare,
   X,
+  CheckCircle2,
 } from 'lucide-react-native';
 import { BookingCard, type Booking, type BookingStatus } from '@/components/barber/BookingCard';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { ListSkeleton } from '@/components/ui/Skeleton';
+import { CompleteProfileBanner, isProfileIncomplete } from '@/components/barber/CompleteProfileBanner';
 import { useAuthStore } from '@/stores/authStore';
 import type { BarberProfile } from '@/types/user';
 
@@ -222,6 +225,8 @@ interface SwipeCardItemProps {
   onToggleSelect: (id: string) => void;
   onCancelPress: (id: string) => void;
   onDeletePress: (id: string) => void;
+  /** Present only for freelance barbers — enables the Accept/Decline request flow. */
+  onAcceptPress?: (id: string) => void;
 }
 
 function SwipeCardItem({
@@ -233,6 +238,7 @@ function SwipeCardItem({
   onToggleSelect,
   onCancelPress,
   onDeletePress,
+  onAcceptPress,
 }: SwipeCardItemProps) {
   const swipeRef = useRef<Swipeable>(null);
   const isUpcoming = tab === 'Upcoming';
@@ -250,6 +256,8 @@ function SwipeCardItem({
       isSelectionMode={isSelectionMode}
       onLongPress={onLongPress}
       onPress={onToggleSelect}
+      onAccept={onAcceptPress}
+      onDecline={onAcceptPress ? onCancelPress : undefined}
     />
   );
 
@@ -377,12 +385,34 @@ export default function BarberBookingsScreen() {
 
   const tabWidth = width / TABS.length;
 
+  // Freelance (mobile) barbers must accept each request; shop bookings auto-confirm.
+  const isFreelance = barber?.barberType === 'mobile';
+
   // ── State ────────────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab]         = useState<TabName>('Upcoming');
   const [bookings, setBookings]           = useState<Booking[]>(MOCK_BOOKINGS);
+  const [loading, setLoading]             = useState(true);
   const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelection] = useState(false);
   const [modalConfig, setModalConfig]     = useState<ModalConfig | null>(null);
+  const [acceptToast, setAcceptToast]     = useState('');
+
+  // TODO: replace with the real bookings fetch once the bookings endpoint exists.
+  useEffect(() => {
+    const t = setTimeout(() => setLoading(false), 450);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Freelance request flow: accepting confirms the slot and notifies the client
+  // to proceed with payment.
+  function handleAccept(id: string) {
+    setBookings((prev) =>
+      prev.map((b) => (b.id === id ? { ...b, status: 'confirmed' as BookingStatus } : b)),
+    );
+    // TODO: PATCH /api/bookings/:id/accept → push notification + payment request to client
+    setAcceptToast('Request accepted — client notified to make payment');
+    setTimeout(() => setAcceptToast(''), 2800);
+  }
 
   // ── Animated values ──────────────────────────────────────────────────────────
   /*
@@ -507,14 +537,19 @@ export default function BarberBookingsScreen() {
 
   const modalContent = modalConfig ? getModalContent(modalConfig) : null;
 
+  const showBanner = isProfileIncomplete(barber);
+
   return (
     <View className="flex-1 bg-white">
+
+      {/* ── Complete-profile banner (very top, full width, static) ── */}
+      <CompleteProfileBanner insetTop={insets.top} />
 
       {/* ── Purple decorative header ─────────────────────────── */}
       <View
         style={{
           backgroundColor: '#2D27A8',
-          paddingTop:       insets.top,
+          paddingTop:       showBanner ? 0 : insets.top,
           overflow:         'hidden',
         }}
       >
@@ -539,7 +574,7 @@ export default function BarberBookingsScreen() {
 
         {/* Page title */}
         <View className="px-5 pt-1 pb-5">
-          <Text style={{ fontSize: 26, fontWeight: '800', color: '#ffffff' }}>Bookings</Text>
+          <Text style={{ fontSize: 16, fontWeight: '600', color: '#ffffff' }}>Bookings</Text>
           <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', marginTop: 2 }}>
             Manage your schedule and requests.
           </Text>
@@ -556,6 +591,11 @@ export default function BarberBookingsScreen() {
       />
 
       {/* ── Swipeable pager — one FlatList per tab page ───────── */}
+      {loading ? (
+        <View style={{ flex: 1, backgroundColor: '#F5F6F8' }}>
+          <ListSkeleton count={3} />
+        </View>
+      ) : (
       <Animated.ScrollView
         ref={pagerRef as React.RefObject<Animated.ScrollView>}
         horizontal
@@ -594,6 +634,7 @@ export default function BarberBookingsScreen() {
                     onToggleSelect={toggleSelection}
                     onCancelPress={handleSwipeCancel}
                     onDeletePress={handleSwipeDelete}
+                    onAcceptPress={isFreelance ? handleAccept : undefined}
                   />
                 )}
               />
@@ -601,6 +642,7 @@ export default function BarberBookingsScreen() {
           );
         })}
       </Animated.ScrollView>
+      )}
 
       {/* ── Selection bar — absolute overlay above tab bar ────── */}
       {isSelectionMode && (
@@ -626,6 +668,23 @@ export default function BarberBookingsScreen() {
           cancelLabel="Keep"
           variant="danger"
         />
+      )}
+
+      {/* ── Accept confirmation toast ──────────────────────────── */}
+      {acceptToast !== '' && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute', top: insets.top + 60, left: 20, right: 20,
+            backgroundColor: '#38A169', borderRadius: 14,
+            paddingVertical: 14, paddingHorizontal: 18,
+            flexDirection: 'row', alignItems: 'center', gap: 10, zIndex: 999,
+            shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 8,
+          }}
+        >
+          <CheckCircle2 size={18} color="#fff" />
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13, flex: 1 }}>{acceptToast}</Text>
+        </View>
       )}
     </View>
   );

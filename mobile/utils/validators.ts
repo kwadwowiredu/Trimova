@@ -11,6 +11,11 @@ export function isValidPassword(password: string): boolean {
   return password.length >= 8;
 }
 
+/** All sign-up password rules: 8+ chars, at least one uppercase, at least one number. */
+export function meetsAllPasswordRules(password: string): boolean {
+  return password.length >= 8 && /[A-Z]/.test(password) && /[0-9]/.test(password);
+}
+
 export function getPasswordStrength(password: string): 'weak' | 'medium' | 'strong' {
   if (password.length < 8) return 'weak';
   const hasUpper = /[A-Z]/.test(password);

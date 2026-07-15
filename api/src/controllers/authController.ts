@@ -28,6 +28,8 @@ function formatUser(user: Record<string, unknown>) {
     role:      user.role,
     avatarUrl: user.avatar_url,
     createdAt: user.created_at,
+    // FALSE until the user explicitly picks a role. Legacy rows default TRUE.
+    roleSelected: user.role_selected ?? true,
   };
 }
 
@@ -43,29 +45,54 @@ async function enrichUser(
   const base = formatUser(user);
   if (user.role !== 'barber') return base;
 
-  const { data: p } = await supabase
+  // select('*') so a missing column (un-run migration) degrades to undefined for
+  // that field instead of failing the entire query and nulling ALL barber fields.
+  const { data: p, error: pErr } = await supabase
     .from('barber_profiles')
-    .select(
-      'barber_type, business_name, bio, onboarding_complete, ' +
-      'is_available, is_verified, rating, review_count, ' +
-      'service_radius_km, location_address, portfolio_images',
-    )
+    .select('*')
     .eq('user_id', user.id as string)
-    .maybeSingle() as { data: Record<string, unknown> | null };
+    .maybeSingle() as { data: Record<string, unknown> | null; error: unknown };
+
+  if (pErr) console.error('[enrichUser] barber_profiles fetch failed:', pErr);
+
+  const hasCoords = p?.lat != null && p?.lng != null;
 
   return {
     ...base,
     barberType:         p?.barber_type          ?? null,
     businessName:       p?.business_name         ?? null,
     bio:                p?.bio                   ?? null,
+    coverPhotoUrl:      p?.cover_photo_url       ?? null,
     onboardingComplete: p?.onboarding_complete   ?? false,
     isAvailable:        p?.is_available          ?? true,
+    // Whether this barber takes bookings themselves. Shop staff can flip this to
+    // "Admin only"; mobile/freelance barbers are always bookable. Defaults to true.
+    isBookable:         p?.is_bookable           ?? true,
     isVerified:         p?.is_verified           ?? false,
     rating:             parseFloat(String(p?.rating)) || 0,
     reviewCount:        p?.review_count          || 0,
     serviceRadius:      p?.service_radius_km     ?? null,
     locationAddress:    p?.location_address      ?? null,
+    location:           hasCoords
+      ? { lat: Number(p?.lat), lng: Number(p?.lng), address: (p?.location_address as string) ?? '' }
+      : null,
+    instagram:          p?.instagram             ?? null,
+    facebook:           p?.facebook              ?? null,
+    tiktok:             p?.tiktok                ?? null,
     portfolioImages:    p?.portfolio_images       || [],
+    payout: p?.payout_provider
+      ? {
+          provider:      p?.payout_provider       as string,
+          accountName:   (p?.payout_account_name   as string) ?? '',
+          accountNumber: (p?.payout_account_number as string) ?? '',
+          type:          (p?.payout_type           as string) ?? 'mobile_money',
+        }
+      : null,
+    bookingRules: {
+      leadMinutes:           Number(p?.booking_lead_minutes ?? 30),
+      futureDays:            Number(p?.booking_future_days ?? 90),
+      rescheduleLeadMinutes: Number(p?.reschedule_lead_minutes ?? 60),
+    },
   };
 }
 
@@ -112,6 +139,8 @@ export const authController = {
         phone: phone?.trim() ?? null,
         password_hash: passwordHash,
         role,
+        // Role isn't final until the user confirms it on the role-selection screen.
+        role_selected: false,
       })
       .select()
       .single();
@@ -241,6 +270,7 @@ export const authController = {
             google_id: googleId,
             avatar_url: picture ?? null,
             role: 'client',
+            role_selected: false,
           })
           .select()
           .single();
@@ -254,8 +284,7 @@ export const authController = {
     }
 
     const token = signToken(user.id, user.role, user.email);
-    const isNewUser = !user.role || user.role === 'client';
-    sendSuccess(res, { token, user: await enrichUser(user, supabase), requiresRoleSelection: isNewUser });
+    sendSuccess(res, { token, user: await enrichUser(user, supabase), requiresRoleSelection: user.role_selected === false });
   },
 
   async appleAuth(req: Request, res: Response) {
@@ -306,6 +335,7 @@ export const authController = {
             email: resolvedEmail,
             apple_id: appleId,
             role: 'client',
+            role_selected: false,
           })
           .select()
           .single();
@@ -319,7 +349,7 @@ export const authController = {
     }
 
     const token = signToken(user.id, user.role, user.email);
-    sendSuccess(res, { token, user: await enrichUser(user, supabase) });
+    sendSuccess(res, { token, user: await enrichUser(user, supabase), requiresRoleSelection: user.role_selected === false });
   },
 
   async forgotPassword(req: Request, res: Response) {
@@ -382,6 +412,224 @@ export const authController = {
     sendSuccess(res, null, 'Password reset successfully. You can now log in.');
   },
 
+  /** PATCH /auth/me — update profile fields on users + barber_profiles. */
+  async updateProfile(req: Request, res: Response) {
+    const userId = req.user!.sub;
+    const body = req.body as Record<string, unknown>;
+    const {
+      fullName, phone, avatarUrl,
+      businessName, bio, coverPhotoUrl, instagram, facebook, tiktok,
+      payoutProvider, payoutAccountName, payoutAccountNumber, payoutType,
+    } = body as Record<string, string | null | undefined>;
+    const portfolioImages = body.portfolioImages as string[] | undefined;
+    const isBookable            = body.isBookable as boolean | undefined;
+    const bookingLeadMinutes    = body.bookingLeadMinutes as number | undefined;
+    const bookingFutureDays     = body.bookingFutureDays as number | undefined;
+    const rescheduleLeadMinutes = body.rescheduleLeadMinutes as number | undefined;
+
+    const supabase = getSupabase();
+
+    // ── users table ──────────────────────────────────────────────────────────
+    const userUpdate: Record<string, unknown> = {};
+    if (fullName !== undefined)  userUpdate.full_name = fullName?.trim() ?? null;
+    if (phone !== undefined)     userUpdate.phone = phone?.trim() ?? null;
+    if (avatarUrl !== undefined) userUpdate.avatar_url = avatarUrl ?? null;
+
+    if (Object.keys(userUpdate).length > 0) {
+      const { error } = await supabase.from('users').update(userUpdate).eq('id', userId);
+      if (error) { sendError(res, 'Failed to update profile.', 500); return; }
+    }
+
+    // ── barber_profiles table (barbers only) ────────────────────────────────
+    if (req.user!.role === 'barber') {
+      const profileUpdate: Record<string, unknown> = {};
+      if (businessName !== undefined)  profileUpdate.business_name = businessName?.trim() ?? null;
+      if (bio !== undefined)           profileUpdate.bio = bio ?? null;
+      if (coverPhotoUrl !== undefined) profileUpdate.cover_photo_url = coverPhotoUrl ?? null;
+      if (instagram !== undefined)     profileUpdate.instagram = instagram ?? null;
+      if (facebook !== undefined)      profileUpdate.facebook = facebook ?? null;
+      if (tiktok !== undefined)        profileUpdate.tiktok = tiktok ?? null;
+      if (portfolioImages !== undefined)      profileUpdate.portfolio_images = Array.isArray(portfolioImages) ? portfolioImages : [];
+      if (isBookable !== undefined)           profileUpdate.is_bookable = !!isBookable;
+      if (payoutProvider !== undefined)       profileUpdate.payout_provider = payoutProvider ?? null;
+      if (payoutAccountName !== undefined)    profileUpdate.payout_account_name = payoutAccountName ?? null;
+      if (payoutAccountNumber !== undefined)  profileUpdate.payout_account_number = payoutAccountNumber ?? null;
+      if (payoutType !== undefined)           profileUpdate.payout_type = payoutType ?? null;
+      if (bookingLeadMinutes !== undefined)     profileUpdate.booking_lead_minutes = bookingLeadMinutes;
+      if (bookingFutureDays !== undefined)      profileUpdate.booking_future_days = bookingFutureDays;
+      if (rescheduleLeadMinutes !== undefined)  profileUpdate.reschedule_lead_minutes = rescheduleLeadMinutes;
+
+      if (Object.keys(profileUpdate).length > 0) {
+        const { error } = await supabase
+          .from('barber_profiles')
+          .upsert({ user_id: userId, ...profileUpdate }, { onConflict: 'user_id' });
+        if (error) { sendError(res, 'Failed to update business profile.', 500); return; }
+      }
+    }
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (!user) { sendError(res, 'User not found.', 404); return; }
+
+    sendSuccess(res, await enrichUser(user, supabase), 'Profile updated.');
+  },
+
+  /** POST /auth/verify-password — confirm the current password (used before destructive flows). */
+  async verifyPassword(req: Request, res: Response) {
+    const { password } = req.body as { password?: string };
+    if (!password) {
+      sendError(res, 'Password is required.');
+      return;
+    }
+    const supabase = getSupabase();
+    const { data: user } = await supabase
+      .from('users')
+      .select('password_hash')
+      .eq('id', req.user!.sub)
+      .single();
+
+    if (!user) {
+      sendError(res, 'User not found.', 404);
+      return;
+    }
+    // Social-login accounts have no password — nothing to verify.
+    if (!user.password_hash) {
+      sendSuccess(res, { valid: true });
+      return;
+    }
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) {
+      sendError(res, 'Your password is incorrect.', 401);
+      return;
+    }
+    sendSuccess(res, { valid: true }, 'Verified.');
+  },
+
+  /** POST /auth/logout — disassociate this user's push token (token stays on device). */
+  async logout(req: Request, res: Response) {
+    const supabase = getSupabase();
+    try {
+      await supabase.from('users').update({ push_token: null }).eq('id', req.user!.sub);
+    } catch {
+      // Non-fatal — logout should always succeed client-side.
+    }
+    sendSuccess(res, null, 'Logged out.');
+  },
+
+  /** DELETE /auth/me — permanently delete the account and all owned data. */
+  async deleteAccount(req: Request, res: Response) {
+    const { password } = req.body as { password?: string };
+    const userId = req.user!.sub;
+    const supabase = getSupabase();
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, password_hash')
+      .eq('id', userId)
+      .single();
+
+    if (!user) {
+      sendError(res, 'User not found.', 404);
+      return;
+    }
+
+    // Password-based accounts must confirm with their password.
+    if (user.password_hash) {
+      if (!password) {
+        sendError(res, 'Password is required to delete your account.');
+        return;
+      }
+      const ok = await bcrypt.compare(password, user.password_hash);
+      if (!ok) {
+        sendError(res, 'Your password is incorrect.', 401);
+        return;
+      }
+    }
+
+    // Best-effort: remove the user's uploaded images from storage.
+    for (const bucket of ['avatars', 'covers']) {
+      try {
+        const { data: files } = await supabase.storage.from(bucket).list(userId);
+        if (files && files.length) {
+          await supabase.storage.from(bucket).remove(files.map((f) => `${userId}/${f.name}`));
+        }
+      } catch {
+        // ignore storage cleanup failures
+      }
+    }
+
+    // Delete the user row. barber_profiles + password_reset_tokens cascade.
+    const { error } = await supabase.from('users').delete().eq('id', userId);
+    if (error) {
+      console.error('[Delete Account Error]', error);
+      sendError(res, 'Failed to delete account. Please try again.', 500);
+      return;
+    }
+
+    sendSuccess(res, null, 'Account deleted.');
+  },
+
+  async changePassword(req: Request, res: Response) {
+    const { currentPassword, newPassword } = req.body as {
+      currentPassword: string;
+      newPassword: string;
+    };
+
+    if (!currentPassword || !newPassword) {
+      sendError(res, 'Current and new password are required.');
+      return;
+    }
+    if (newPassword.length < 8) {
+      sendError(res, 'New password must be at least 8 characters.');
+      return;
+    }
+    if (!/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      sendError(res, 'New password must include at least one uppercase letter and one number.');
+      return;
+    }
+
+    const supabase = getSupabase();
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, password_hash')
+      .eq('id', req.user!.sub)
+      .single();
+
+    if (!user) {
+      sendError(res, 'User not found.', 404);
+      return;
+    }
+
+    if (!user.password_hash) {
+      sendError(res, 'This account uses social login and has no password to change.', 400);
+      return;
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isMatch) {
+      sendError(res, 'Your current password is incorrect.', 401);
+      return;
+    }
+
+    const newHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    const { error } = await supabase
+      .from('users')
+      .update({ password_hash: newHash })
+      .eq('id', user.id);
+
+    if (error) {
+      sendError(res, 'Failed to update password. Please try again.', 500);
+      return;
+    }
+
+    sendSuccess(res, null, 'Password updated successfully.');
+  },
+
   async updateRole(req: Request, res: Response) {
     const { role } = req.body as { role: UserRole };
     if (!['client', 'barber'].includes(role)) {
@@ -392,7 +640,7 @@ export const authController = {
     const supabase = getSupabase();
     const { data: user, error } = await supabase
       .from('users')
-      .update({ role })
+      .update({ role, role_selected: true })
       .eq('id', req.user!.sub)
       .select()
       .single();
