@@ -53,9 +53,9 @@ export default function ClientEditProfileScreen() {
     }
   }
 
-  const label = { fontSize: 11, fontWeight: '800' as const, color: '#8a89a3', letterSpacing: 0.8, textTransform: 'uppercase' as const, marginBottom: 6 };
+  const label = { fontSize: 11, fontWeight: '600' as const, color: '#6c757d', letterSpacing: 0.6, textTransform: 'uppercase' as const, marginBottom: 6 };
   const input = {
-    backgroundColor: '#F4F5FA', borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14,
+    backgroundColor: '#F4F5FA', borderRadius: 32, paddingHorizontal: 16, paddingVertical: 14,
     fontSize: 15, color: '#161c27',
   } as const;
 
@@ -67,7 +67,7 @@ export default function ClientEditProfileScreen() {
           <Pressable onPress={() => router.back()} hitSlop={10}>
             <ChevronLeft size={26} color="#161c27" />
           </Pressable>
-          <Text style={{ flex: 1, fontSize: 18, fontWeight: '800', color: '#161c27' }}>Edit Profile</Text>
+          <Text style={{ flex: 1, fontSize: 18, fontWeight: '600', color: '#023047' }}>Edit Profile</Text>
         </View>
 
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20 }}>
@@ -85,7 +85,7 @@ export default function ClientEditProfileScreen() {
                 <Camera size={15} color="#ffffff" />
               </View>
             </Pressable>
-            <Text style={{ fontSize: 12, color: '#3c3cb9', fontWeight: '600', marginTop: 8 }}>Tap to change photo</Text>
+            <Text style={{ fontSize: 12, color: '#023047', fontWeight: '600', marginTop: 8 }}>Tap to change photo</Text>
           </View>
 
           <Text style={label}>Full Name</Text>
@@ -106,9 +106,9 @@ export default function ClientEditProfileScreen() {
           <Pressable
             onPress={handleSave}
             disabled={saving}
-            style={{ backgroundColor: '#161c27', borderRadius: 999, paddingVertical: 16, alignItems: 'center', opacity: saving ? 0.7 : 1 }}
+            style={{ backgroundColor: '#023047', borderRadius: 999, paddingVertical: 16, alignItems: 'center', opacity: saving ? 0.7 : 1 }}
           >
-            {saving ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontSize: 15, fontWeight: '800' }}>Save Changes</Text>}
+            {saving ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontSize: 15, fontWeight: '600' }}>Save Changes</Text>}
           </Pressable>
         </View>
       </View>

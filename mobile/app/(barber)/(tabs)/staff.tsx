@@ -13,7 +13,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { UserPlus, Star, X, Bell } from 'lucide-react-native';
+import { UserPlus, Star, X, Bell, Ticket, Copy, Trash2 } from 'lucide-react-native';
+import { ActivityIndicator, Share, Alert } from 'react-native';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { staffService, type StaffInvite } from '@/services/staff';
+import { getApiErrorMessage } from '@/services/api';
 import { Input } from '@/components/ui/Input';
 import { CardSkeleton, Skeleton } from '@/components/ui/Skeleton';
 import { CompleteProfileBanner, isProfileIncomplete } from '@/components/barber/CompleteProfileBanner';
@@ -64,23 +68,42 @@ function SquareAvatar({ uri, name, size = 60, c }: { uri: string | null; name: s
 
 // ─── Add Staff modal ──────────────────────────────────────────────────────────
 
-function AddStaffModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+function AddStaffModal({ visible, onClose, onInvited }: {
+  visible: boolean;
+  onClose: () => void;
+  onInvited: (invite: StaffInvite, emailSent: boolean) => void;
+}) {
   const c = useThemeColors();
   const [name, setName]       = useState('');
   const [email, setEmail]     = useState('');
   const [phone, setPhone]     = useState('');
   const [nameError, setNameError]   = useState('');
   const [emailError, setEmailError] = useState('');
+  const [sending, setSending] = useState(false);
 
-  function handleSend() {
+  async function handleSend() {
     let valid = true;
     if (!name.trim()) { setNameError('Full name is required'); valid = false; } else setNameError('');
     if (!email.trim()) { setEmailError('Email address is required'); valid = false; }
     else if (!/^\S+@\S+\.\S+$/.test(email.trim())) { setEmailError('Enter a valid email address'); valid = false; }
     else setEmailError('');
     if (!valid) return;
-    // TODO: POST /api/barbers/me/staff/invite  { name, email, phone }
-    handleClose();
+
+    setSending(true);
+    try {
+      const res = await staffService.invite({
+        fullName: name.trim(),
+        email: email.trim(),
+        phone: phone.trim() || undefined,
+      });
+      const { invite, emailSent } = res.data.data;
+      handleClose();
+      onInvited(invite, emailSent);
+    } catch (e) {
+      setEmailError(getApiErrorMessage(e) || "Couldn't send the invitation.");
+    } finally {
+      setSending(false);
+    }
   }
 
   function handleClose() {
@@ -115,7 +138,8 @@ function AddStaffModal({ visible, onClose }: { visible: boolean; onClose: () => 
               {/* Info banner */}
               <View style={{ borderRadius: 16, padding: 16, backgroundColor: '#dfe7fd' }}>
                 <Text style={{ fontSize: 14, color: '#003049', lineHeight: 22 }}>
-                  An invitation will be sent to this barber's email. If they already have a Trimova account, they will be added to your team immediately.
+                  We'll email them an invite link plus a join code. The invite only works with
+                  this email address, expires in 7 days, and you can revoke it any time.
                 </Text>
               </View>
             </View>
@@ -123,9 +147,20 @@ function AddStaffModal({ visible, onClose }: { visible: boolean; onClose: () => 
 
           {/* CTA */}
           <View className="px-1 pt-4" style={{ paddingBottom: Platform.OS === 'ios' ? 32 : 24 }}>
-            <Pressable onPress={handleSend} style={{ backgroundColor: c.accent, borderRadius: 10, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }} className="active:opacity-80">
-              <UserPlus size={18} color="white" />
-              <Text className="text-white font-bold text-base">Send Invitation</Text>
+            <Pressable
+              onPress={handleSend}
+              disabled={sending}
+              style={{ backgroundColor: c.accent, borderRadius: 10, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: sending ? 0.7 : 1 }}
+              className="active:opacity-80"
+            >
+              {sending ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <UserPlus size={18} color="white" />
+                  <Text className="text-white font-bold text-base">Send Invitation</Text>
+                </>
+              )}
             </Pressable>
           </View>
         </View>
@@ -284,6 +319,58 @@ export default function BarberStaffScreen() {
   const [loading, setLoading]        = useState(true);
   const [showAddModal, setShowModal] = useState(false);
 
+  // Real staff invitations sent by this shop.
+  const queryClient = useQueryClient();
+  const { data: inviteRes } = useQuery({
+    queryKey: ['staff', 'invites'],
+    queryFn: () => staffService.listInvites(),
+  });
+  const invites = inviteRes?.data.data ?? [];
+  const pendingInvites = invites.filter((i) => i.status === 'pending');
+
+  function refreshInvites() {
+    queryClient.invalidateQueries({ queryKey: ['staff', 'invites'] });
+  }
+
+  /** Show the code straight after inviting, so it can be shared in person. */
+  function handleInvited(invite: StaffInvite, emailSent: boolean) {
+    refreshInvites();
+    Alert.alert(
+      emailSent ? 'Invitation sent' : 'Invitation created',
+      `${emailSent
+        ? `We emailed ${invite.email} a join link and this code.`
+        : `Email isn't configured yet, so share this code with ${invite.fullName} directly.`}\n\nCode: ${invite.code}\n\nIt only works with their email address and expires in 7 days.`,
+      [
+        { text: 'Done' },
+        { text: 'Share code', onPress: () => shareInvite(invite) },
+      ],
+    );
+  }
+
+  async function shareInvite(invite: StaffInvite) {
+    await Share.share({
+      message: `Hi ${invite.fullName}, join our shop on Trimova.\n\nOpen the app, tap "I have an invite code" and enter: ${invite.code}\n\nUse the email ${invite.email} to sign up. The code expires in 7 days.`,
+    });
+  }
+
+  function confirmRevoke(invite: StaffInvite) {
+    Alert.alert('Revoke invitation?', `${invite.fullName} will no longer be able to join with this code.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Revoke',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await staffService.revokeInvite(invite.id);
+            refreshInvites();
+          } catch (e) {
+            Alert.alert('Failed', getApiErrorMessage(e) || "Couldn't revoke the invitation.");
+          }
+        },
+      },
+    ]);
+  }
+
   const showBanner = isProfileIncomplete(barber);
 
   // The owner's own bookable status (from onboarding step 6 / settings).
@@ -385,6 +472,40 @@ export default function BarberStaffScreen() {
             </View>
           </View>
 
+          {/* Pending invitations */}
+          {pendingInvites.length > 0 && (
+            <View className="gap-3 mt-1">
+              <Text style={{ fontSize: 11, fontWeight: '800', color: c.textFaint, letterSpacing: 1, textTransform: 'uppercase' }}>
+                Pending invitations
+              </Text>
+              {pendingInvites.map((inv) => (
+                <View key={inv.id} style={{ backgroundColor: c.surface, borderRadius: 14, borderWidth: 1, borderColor: c.border, padding: 14 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: c.accentSoft, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ticket size={19} color={c.accent} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: c.text }} numberOfLines={1}>{inv.fullName}</Text>
+                      <Text style={{ fontSize: 12, color: c.textFaint, marginTop: 1 }} numberOfLines={1}>{inv.email}</Text>
+                    </View>
+                    <Pressable onPress={() => confirmRevoke(inv)} hitSlop={8}>
+                      <Trash2 size={17} color={c.danger} />
+                    </Pressable>
+                  </View>
+
+                  <Pressable
+                    onPress={() => shareInvite(inv)}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surfaceAlt, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, marginTop: 12 }}
+                  >
+                    <Text style={{ flex: 1, fontSize: 15, fontWeight: '800', letterSpacing: 2, color: c.text }}>{inv.code}</Text>
+                    <Copy size={15} color={c.accent} />
+                    <Text style={{ fontSize: 12.5, fontWeight: '700', color: c.accent }}>Share</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+
           {/* Staff list */}
           <View className="gap-3 mt-1">
             {loading ? (
@@ -412,7 +533,11 @@ export default function BarberStaffScreen() {
         </View>
       </ScrollView>
 
-      <AddStaffModal visible={showAddModal} onClose={() => setShowModal(false)} />
+      <AddStaffModal
+        visible={showAddModal}
+        onClose={() => setShowModal(false)}
+        onInvited={handleInvited}
+      />
     </View>
   );
 }

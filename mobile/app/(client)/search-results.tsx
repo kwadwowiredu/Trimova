@@ -16,6 +16,7 @@ import { ChevronLeft, Search, SearchX, Star, MapPin, Scissors, X } from 'lucide-
 import { useLocationStore } from '@/stores/locationStore';
 import { barbersService } from '@/services/barbers';
 import { useDebounce } from '@/hooks/useDebounce';
+import { T, HAIRLINE, chip } from '@/constants/clientTheme';
 import type { BarberListItem } from '@/types/user';
 
 /**
@@ -37,26 +38,26 @@ function ResultCard({ barber }: { barber: BarberListItem }) {
       className="active:opacity-90"
     >
       {/* Cover banner */}
-      <View style={{ height: 210, borderRadius: 4, overflow: 'hidden', backgroundColor: '#E7E9F5' }}>
+      <View style={{ height: 170, borderRadius: 14, overflow: 'hidden', backgroundColor: T.inputDeep }}>
         {bannerUri ? (
-          <Image source={{ uri: bannerUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+          <Image source={{ uri: bannerUri }} style={{ width: '100%', height: '180%' }} resizeMode="cover" />
         ) : (
           <LinearGradient
-            colors={['#3c3cb9', '#6d5bd0', '#9d7fe8']}
+            colors={['#eef0ff', '#e8eeff']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
           >
-            <Scissors size={40} color="rgba(255,255,255,0.85)" />
+            <Scissors size={36} color={T.textDisabled} />
           </LinearGradient>
         )}
-        {/* Rating badge */}
-        <View style={{ position: 'absolute', top: 10, right: 10, alignItems: 'flex-end', backgroundColor: 'rgba(15,17,35,0.72)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}>
-          <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: '800' }}>
-            {barber.rating > 0 ? barber.rating.toFixed(1) : 'New'}
+        {/* Rating badge — frosted, deep type */}
+        <View style={{ position: 'absolute', top: 10, right: 10, alignItems: 'flex-end', backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 7 }}>
+          <Text style={{ color: T.text, fontSize: 17, fontWeight: '800' }}>
+            {barber.rating > 0 ? barber.rating.toFixed(1) : '–'}
           </Text>
           {barber.reviewCount > 0 && (
-            <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 11 }}>{barber.reviewCount} reviews</Text>
+            <Text style={{ color: T.textFaint, fontSize: 11 }}>{barber.reviewCount} reviews</Text>
           )}
         </View>
       </View>
@@ -71,25 +72,25 @@ function ResultCard({ barber }: { barber: BarberListItem }) {
       )}
 
       {/* Info */}
-      <Text style={{ fontSize: 19, fontWeight: '800', color: '#161c27', marginTop: 12 }} numberOfLines={2}>
+      <Text style={{ fontSize: 16, fontWeight: '600', color: T.accent, marginTop: 10 }} numberOfLines={2}>
         {title}
       </Text>
       {barber.businessName ? (
-        <Text style={{ fontSize: 13, color: '#8a89a3', marginTop: 2 }} numberOfLines={1}>{barber.fullName}</Text>
+        <Text style={{ fontSize: 13, color: T.textFaint, marginTop: 2 }} numberOfLines={1}>{barber.fullName}</Text>
       ) : null}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 5 }}>
-        <MapPin size={13} color="#fdb276" />
-        <Text style={{ flex: 1, fontSize: 13.5, color: '#464554' }} numberOfLines={1}>
+        <MapPin size={13} color={T.textFaint} />
+        <Text style={{ flex: 1, fontSize: 12, color: T.textMuted }} numberOfLines={1}>
           {barber.locationAddress ?? 'Location not set'}
         </Text>
         {barber.distance != null && (
-          <Text style={{ fontSize: 13, fontWeight: '700', color: '#3c3cb9' }}>{barber.distance.toFixed(1)} km</Text>
+          <Text style={{ fontSize: 13, fontWeight: '700', color: T.textMuted }}>{barber.distance.toFixed(1)} km</Text>
         )}
       </View>
       {barber.barberType === 'mobile' && (
         <View style={{ flexDirection: 'row', marginTop: 8 }}>
-          <View style={{ backgroundColor: '#e6f9ee', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 }}>
-            <Text style={{ fontSize: 11, fontWeight: '800', color: '#006d40' }}>COMES TO YOU</Text>
+          <View style={{ backgroundColor: chip('success').bg, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 }}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: chip('success').fg }}>COMES TO YOU</Text>
           </View>
         </View>
       )}
@@ -100,9 +101,9 @@ function ResultCard({ barber }: { barber: BarberListItem }) {
 function ResultSkeleton() {
   return (
     <View style={{ marginHorizontal: 16, marginBottom: 26 }}>
-      <View style={{ height: 210, borderRadius: 4, backgroundColor: '#EEF0F8' }} />
-      <View style={{ height: 18, width: '65%', borderRadius: 8, backgroundColor: '#EEF0F8', marginTop: 12 }} />
-      <View style={{ height: 13, width: '45%', borderRadius: 6, backgroundColor: '#F3F4FA', marginTop: 8 }} />
+      <View style={{ height: 170, borderRadius: 14, backgroundColor: T.inputDeep }} />
+      <View style={{ height: 18, width: '65%', borderRadius: 8, backgroundColor: T.inputDeep, marginTop: 12 }} />
+      <View style={{ height: 13, width: '45%', borderRadius: 6, backgroundColor: T.input, marginTop: 8 }} />
     </View>
   );
 }
@@ -115,13 +116,14 @@ export default function SearchResultsScreen() {
   const [query, setQuery] = useState(params.q ?? '');
   const debouncedQuery = useDebounce(query, 350);
 
+  // A typed query searches names, shops AND areas/towns/cities (migration 009),
+  // so it must not be capped to the client's radius — drop lat/lng when typing.
+  const hasQuery = debouncedQuery.trim().length > 0;
   const { data, isLoading } = useQuery({
     queryKey: ['barbers', 'results', debouncedQuery, params.type, params.minRating, coordinates?.lat, coordinates?.lng],
     queryFn: () =>
       barbersService.search({
-        lat: coordinates?.lat,
-        lng: coordinates?.lng,
-        radius: 25,
+        ...(hasQuery ? {} : { lat: coordinates?.lat, lng: coordinates?.lng, radius: 25 }),
         q: debouncedQuery.trim() || undefined,
         type: (params.type as 'barbershop' | 'mobile') || undefined,
         minRating: params.minRating ? Number(params.minRating) : undefined,
@@ -135,26 +137,27 @@ export default function SearchResultsScreen() {
   if (params.sort === 'rating') results = [...results].sort((a, b) => b.rating - a.rating);
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#ffffff', paddingTop: insets.top }}>
+    <View style={{ flex: 1, backgroundColor: T.canvas, paddingTop: insets.top }}>
       {/* ── Search header ────────────────────────────────────── */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#EDF0F7' }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: HAIRLINE, borderBottomColor: T.border }}>
         <Pressable onPress={() => router.back()} hitSlop={10}>
-          <ChevronLeft size={26} color="#161c27" />
+          <ChevronLeft size={26} color={T.text} />
         </Pressable>
-        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#F4F5FA', borderRadius: 999, paddingHorizontal: 16 }}>
-          <Search size={17} color="#8a89a3" />
+        {/* Layer 2 recessed search well */}
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: T.input, borderRadius: 999, paddingHorizontal: 16, borderWidth: HAIRLINE, borderColor: T.border }}>
+          <Search size={17} color={T.textFaint} />
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Search barbers, shops or styles…"
-            placeholderTextColor="#A0AEC0"
+            placeholder="Search barbers, shops or areas…"
+            placeholderTextColor={T.textFaint}
             autoFocus={!params.q}
             returnKeyType="search"
-            style={{ flex: 1, paddingVertical: 12, fontSize: 14.5, color: '#161c27' }}
+            style={{ flex: 1, paddingVertical: 12, fontSize: 14.5, color: T.text }}
           />
           {query.length > 0 && (
             <Pressable onPress={() => setQuery('')} hitSlop={8}>
-              <X size={16} color="#8a89a3" />
+              <X size={16} color={T.textFaint} />
             </Pressable>
           )}
         </View>
@@ -175,12 +178,14 @@ export default function SearchResultsScreen() {
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={{ alignItems: 'center', paddingTop: 90, paddingHorizontal: 40, gap: 12 }}>
-              <SearchX size={48} color="#c7c5d6" />
-              <Text style={{ fontSize: 16, fontWeight: '700', color: '#464554', textAlign: 'center' }}>
+              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: T.input, alignItems: 'center', justifyContent: 'center' }}>
+                <SearchX size={28} color={T.textFaint} />
+              </View>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: T.text, textAlign: 'center' }}>
                 No barbers found
               </Text>
-              <Text style={{ fontSize: 13, color: '#8a89a3', textAlign: 'center', lineHeight: 19 }}>
-                Try a different name or style, or loosen your filters.
+              <Text style={{ fontSize: 13, color: T.textFaint, textAlign: 'center', lineHeight: 19 }}>
+                Try a different name or area, or loosen your filters.
               </Text>
             </View>
           }

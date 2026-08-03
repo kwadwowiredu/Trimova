@@ -24,7 +24,7 @@ import { uploadImage } from '@/services/uploads';
 
 function SectionLabel({ children }: { children: string }) {
   return (
-    <Text className="text-[11px] font-extrabold text-neutral-400 uppercase px-4 mb-1 mt-6" style={{ letterSpacing: 1.2 }}>
+    <Text className="text-[10px] font-bold text-[#6c757d] uppercase px-4 mb-1 mt-6" style={{ letterSpacing: 1.0 }}>
       {children}
     </Text>
   );
@@ -40,9 +40,9 @@ function MenuRow({ icon, label, subtitle, onPress, isLast = false }: {
   return (
     <>
       <Pressable onPress={onPress} className="flex-row items-center px-4 py-4 gap-3 active:bg-neutral-50">
-        <View className="w-9 h-9 rounded-xl bg-neutral-100 items-center justify-center">{icon}</View>
+        <View className="w-9 h-9 items-center justify-center">{icon}</View>
         <View className="flex-1">
-          <Text className="text-[15px] font-semibold text-neutral-800">{label}</Text>
+          <Text className="text-[13px] font-semibold text-[#023047]">{label}</Text>
           {subtitle ? <Text className="text-xs text-neutral-400 mt-0.5">{subtitle}</Text> : null}
         </View>
         <ChevronRight size={16} color="#CBD5E0" />
@@ -84,6 +84,9 @@ export default function ClientProfileScreen() {
   return (
     <ScrollView className="flex-1 bg-white" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
 
+      {/* Overscroll filler — blends with the header instead of flashing white */}
+      <View style={{ position: 'absolute', top: -600, left: 0, right: 0, height: 600, backgroundColor: '#eef0ff' }} />
+
       {/* ── Gradient header with avatar ───────────────────────── */}
       <LinearGradient
         colors={['#eef0ff', '#faf7ff', '#ffffff']}
@@ -103,16 +106,16 @@ export default function ClientProfileScreen() {
             <Camera size={14} color="#ffffff" />
           </View>
         </Pressable>
-        <Text className="text-xl font-extrabold text-neutral-800 mt-3">{user?.fullName ?? 'Client'}</Text>
-        <Text className="text-sm text-neutral-400 mt-0.5">{user?.email}</Text>
+        <Text className="text-xl font-bold text-[#023047] mt-3">{user?.fullName ?? 'Client'}</Text>
+        <Text className="text-sm text-neutral-500 mt-0.5">{user?.email}</Text>
 
         <Pressable
           onPress={() => router.push('/(client)/edit-profile' as never)}
           className="flex-row items-center gap-2 mt-4 bg-white rounded-full px-5 py-2.5 active:opacity-70"
-          style={{ shadowColor: '#3c3cb9', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 3 }}
+          style={{ shadowColor: '#023047', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 3 }}
         >
-          <UserPen size={15} color="#3c3cb9" />
-          <Text className="text-[13px] font-bold" style={{ color: '#3c3cb9' }}>Edit Profile</Text>
+          <UserPen size={15} color="#023047" />
+          <Text className="text-[13px] font-bold" style={{ color: '#023047' }}>Edit Profile</Text>
         </Pressable>
       </LinearGradient>
 
@@ -156,19 +159,19 @@ export default function ClientProfileScreen() {
       <SectionLabel>Activity</SectionLabel>
       <View>
         <MenuRow
-          icon={<Star size={17} color="#D69E2E" />}
+          icon={<Star size={17} color="#718096" />}
           label="My Reviews"
           subtitle="Reviews you've left for barbers"
-          onPress={() => Alert.alert('My Reviews', 'Your reviews will appear here once the review system launches.')}
+          onPress={() => router.push('/(client)/my-reviews' as never)}
         />
         <MenuRow
-          icon={<Gift size={17} color="#3c3cb9" />}
+          icon={<Gift size={17} color="#718096" />}
           label="My Rewards"
           subtitle="Loyalty progress with your barbers"
           onPress={() => Alert.alert('My Rewards', 'Loyalty rewards tracking is coming soon!')}
         />
         <MenuRow
-          icon={<Archive size={17} color="#4A5568" />}
+          icon={<Archive size={17} color="#718096" />}
           label="Appointment History"
           subtitle="Every past booking"
           onPress={() => router.push('/(client)/(tabs)/bookings' as never)}
@@ -180,13 +183,13 @@ export default function ClientProfileScreen() {
       <SectionLabel>Account & Security</SectionLabel>
       <View>
         <MenuRow
-          icon={<ShieldCheck size={17} color="#38A169" />}
+          icon={<ShieldCheck size={17} color="#718096" />}
           label="Account Security"
           subtitle="Change password · 2FA (coming soon)"
           onPress={() => router.push('/(client)/security' as never)}
         />
         <MenuRow
-          icon={<HelpCircle size={17} color="#3182CE" />}
+          icon={<HelpCircle size={17} color="#718096" />}
           label="Help & Support"
           subtitle="Contact the Trimova team"
           onPress={() =>
@@ -196,7 +199,7 @@ export default function ClientProfileScreen() {
           }
         />
         <MenuRow
-          icon={<Settings2 size={17} color="#4A5568" />}
+          icon={<Settings2 size={17} color="#718096" />}
           label="Settings"
           subtitle="Privacy, appearance, account"
           onPress={() => router.push('/(client)/settings' as never)}

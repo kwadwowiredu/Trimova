@@ -302,11 +302,15 @@ export const barberController = {
         reviewCount:      p.review_count || 0,
         isVerified:       p.is_verified,
         isAvailable:      p.is_available,
+        // Whether the owner themselves takes bookings (staff mgmt toggle).
+        isBookable:       p.is_bookable ?? true,
         onboardingComplete: p.onboarding_complete,
         serviceRadius:    p.service_radius_km,
         locationAddress:  p.location_address,
         portfolioImages:  p.portfolio_images || [],
         coverPhotoUrl:    p.cover_photo_url ?? null,
+        lat:              p.lat ?? null,
+        lng:              p.lng ?? null,
         workingHours,
         services: (services || []).map((s) => ({
           id:              s.id,

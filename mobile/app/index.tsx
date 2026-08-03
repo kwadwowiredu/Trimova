@@ -42,6 +42,11 @@ export default function Index() {
     return <Redirect href="/(barber)/onboarding/barber-type" />;
   }
 
-  // staff_barber and unknown roles — fall back to login
+  if (role === 'staff_barber') {
+    // Cast: expo-router's generated route types lag behind newly added groups.
+    return <Redirect href={'/(staff)/(tabs)' as never} />;
+  }
+
+  // Unknown role — fall back to login
   return <Redirect href="/(auth)/login" />;
 }

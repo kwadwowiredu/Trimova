@@ -43,17 +43,60 @@ export default function LocationPickerScreen() {
   // Last coordinate we actually looked up — used to skip near-duplicate lookups
   // that would otherwise hammer the OS geocoder and trip its rate limit.
   const lastGeocoded = useRef<{ lat: number; lng: number } | null>(null);
+  // Where the user's explicitly-chosen Places result sits. Small nudges of the
+  // pin around it must NOT overwrite their precise label with a coarse one.
+  const pickedPlace = useRef<{ lat: number; lng: number; label: string } | null>(null);
+
+  /** Rough metres between two coordinates (fine at city scale). */
+  function metresBetween(aLat: number, aLng: number, bLat: number, bLng: number) {
+    const dLat = (aLat - bLat) * 111_320;
+    const dLng = (aLng - bLng) * 111_320 * Math.cos((aLat * Math.PI) / 180);
+    return Math.sqrt(dLat * dLat + dLng * dLng);
+  }
+
+  /**
+   * Build a label from the MOST SPECIFIC fields first.
+   *
+   * The OS geocoder's `district` in Ghana is the constituency (e.g. "Oforikrom"
+   * for a pin in Ayeduase), so leading with it swallows the actual
+   * neighbourhood. `name`/`street` carry the locality, so they come first and
+   * the broader fields are only used to qualify them.
+   */
+  function buildLabel(a: Location.LocationGeocodedAddress): string {
+    const specific = [a.name, a.street].find((v) => v && !/^\d+$/.test(v));
+    const area = a.district || a.subregion;
+    const parts = [specific, area, a.city, a.region]
+      .filter((v): v is string => !!v && v.trim().length > 0);
+
+    // De-duplicate (the geocoder often repeats the same value across fields)
+    // and keep the two most specific pieces so the label stays readable.
+    const seen = new Set<string>();
+    const unique = parts.filter((p) => {
+      const k = p.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    return unique.slice(0, 2).join(', ') || a.country || 'Unknown location';
+  }
 
   async function reverseGeocode(lat: number, lng: number) {
     // Skip if we've barely moved (< ~30m) since the last successful lookup.
     const last = lastGeocoded.current;
     if (last && Math.abs(last.lat - lat) < 0.0003 && Math.abs(last.lng - lng) < 0.0003) return;
+
+    // Still essentially on the place the user searched for — keep their label.
+    const picked = pickedPlace.current;
+    if (picked && metresBetween(lat, lng, picked.lat, picked.lng) < 250) {
+      setSelectedAddress(picked.label);
+      setIsReversing(false);
+      return;
+    }
+
     try {
       const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
       if (results.length > 0) {
-        const { district, city, region: regionName, country } = results[0];
-        const parts = [district, city, regionName].filter(Boolean);
-        setSelectedAddress(parts.length > 0 ? parts.join(', ') : country ?? 'Unknown location');
+        setSelectedAddress(buildLabel(results[0]));
         lastGeocoded.current = { lat, lng };
       }
     } catch {
@@ -158,6 +201,10 @@ export default function LocationPickerScreen() {
             };
             setRegion(newRegion);
             setSelectedAddress(data.description);
+            // Remember the exact place so nudging the pin nearby keeps this
+            // precise name instead of falling back to the constituency.
+            pickedPlace.current = { lat, lng, label: data.description };
+            lastGeocoded.current = { lat, lng };
             placesRef.current?.clear();
           }}
           query={{

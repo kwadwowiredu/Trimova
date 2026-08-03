@@ -8,6 +8,7 @@ import {
   StatusBar,
   RefreshControl,
   Image,
+  Animated,
   useWindowDimensions,
 } from 'react-native';
 import { router } from 'expo-router';
@@ -22,10 +23,16 @@ import { useRefreshSignal } from '@/stores/refreshSignal';
 import { useClientBrowseStore } from '@/stores/clientBrowseStore';
 import { barbersService } from '@/services/barbers';
 import { BarberBannerCard } from '@/components/barber/BarberBannerCard';
+import { PullLoader } from '@/components/ui/PullLoader';
+import { T, HAIRLINE, cardSurface } from '@/constants/clientTheme';
+import { StarIcon } from '@/components/ui/Icons';
 import type { BarberListItem } from '@/types/user';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const APP_LOGO = require('../../../assets/app logo.png');
+// Navy (#14213d) wave icon derived from assets/handwave.jpg.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const HANDWAVE = require('../../../assets/handwave.jpg');
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -38,11 +45,11 @@ function getGreeting(): string {
 /** Banner-card sized skeleton while the carousels load */
 function BannerSkeleton({ cardW }: { cardW: number }) {
   return (
-    <View style={{ width: cardW, marginRight: 14, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: '#EDF0F7' }}>
-      <View style={{ height: Math.round(cardW * 0.62), backgroundColor: '#EEF0F8' }} />
+    <View style={{ width: cardW, marginRight: 14, borderRadius: 18, overflow: 'hidden', backgroundColor: T.card, borderWidth: HAIRLINE, borderColor: T.border }}>
+      <View style={{ height: Math.round(cardW * 0.62), backgroundColor: T.inputDeep }} />
       <View style={{ padding: 14, gap: 8 }}>
-        <View style={{ height: 14, width: '70%', borderRadius: 7, backgroundColor: '#EEF0F8' }} />
-        <View style={{ height: 11, width: '50%', borderRadius: 6, backgroundColor: '#F3F4FA' }} />
+        <View style={{ height: 14, width: '70%', borderRadius: 7, backgroundColor: T.inputDeep }} />
+        <View style={{ height: 11, width: '50%', borderRadius: 6, backgroundColor: T.input }} />
       </View>
     </View>
   );
@@ -75,7 +82,7 @@ function PeekCarousel({
   if (data.length === 0) {
     return (
       <View className="px-4">
-        <Text className="text-sm text-neutral-400">{emptyText}</Text>
+        <Text style={{ fontSize: 13.5, color: T.textFaint }}>{emptyText}</Text>
       </View>
     );
   }
@@ -105,6 +112,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const firstName = user?.fullName?.split(' ')[0] ?? 'there';
   const scrollRef = useRef<ScrollView>(null);
+  const scrollY = useRef(new Animated.Value(0)).current;
   const recentlyViewed = useClientBrowseStore((s) => s.recentlyViewed);
 
   const CARD_W = Math.round(width * 0.72); // keep in sync with BarberBannerCard
@@ -137,92 +145,106 @@ export default function HomeScreen() {
   // Nearby = server order (sorted by distance when coordinates are present).
   const nearby = coordinates ? barbers.slice(0, 8) : [];
 
-  // ── Error state ──
-  if (isError) {
-    return (
-      <View className="flex-1 bg-white items-center justify-center px-8">
-        <AlertCircle size={48} color="#A0AEC0" />
-        <Text className="text-lg font-semibold text-neutral-700 mt-4 text-center">
-          Could not load barbers
-        </Text>
-        <Text className="text-sm text-neutral-500 mt-2 text-center">
-          Check your connection and try again.
-        </Text>
-        <Pressable
-          onPress={() => refetch()}
-          className="bg-primary rounded-xl px-6 py-3 mt-6 active:opacity-80"
-        >
-          <Text className="text-white font-semibold">Retry</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
   return (
-    <View className="flex-1 bg-white">
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
-      <ScrollView
-        ref={scrollRef}
+    <View style={{ flex: 1, backgroundColor: T.canvas }}>
+      <StatusBar barStyle="dark-content" backgroundColor={T.canvas} />
+      <Animated.ScrollView
+        ref={scrollRef as React.RefObject<ScrollView>}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 28 }}
+        scrollEventThrottle={16}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
         refreshControl={
+          // The native spinner is hidden — PullLoader is our visible cue.
           <RefreshControl
             refreshing={isRefetching}
             onRefresh={refetch}
-            tintColor="#fdb276"
-            colors={['#fdb276']}
+            tintColor="transparent"
+            colors={['transparent']}
+            progressBackgroundColor={T.canvas}
           />
         }
       >
-        {/* ── Gradient header: brand + welcome + search ─────────── */}
-        <LinearGradient
-          colors={['#eef0ff', '#f9f6ff', '#ffffff']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0.4, y: 1 }}
-          style={{ paddingTop: insets.top + 8, paddingBottom: 4 }}
-        >
+        {/* ── Hidden "Loading …" strip, revealed by pulling down ── */}
+        <PullLoader scrollY={scrollY} refreshing={isRefetching} background={T.canvas} color={T.accent} />
+
+        {/* ── Header — sits quietly on the canvas, no colour wash ── */}
+        <View style={{ paddingTop: insets.top + 8, paddingBottom: 4, backgroundColor: T.canvas }}>
           {/* Brand row: centered logo + app name, bell pinned right */}
           <View style={{ height: 44, justifyContent: 'center' }}>
             <View className="flex-row items-center justify-center gap-2">
               <Image source={APP_LOGO} style={{ width: 28, height: 34 }} resizeMode="contain" />
-              <Text className="text-xl font-extrabold text-primary tracking-tight">Trimova</Text>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: T.text, letterSpacing: -0.3 }}>Trimova</Text>
             </View>
             <Pressable
               onPress={() => router.push('/(client)/notifications' as never)}
-              className="w-10 h-10 rounded-full bg-white items-center justify-center active:opacity-70"
-              style={{ position: 'absolute', right: 16, borderWidth: 1, borderColor: '#E8EAF6' }}
+              className="active:opacity-70"
+              style={{
+                position: 'absolute', right: 16,
+                width: 40, height: 40, borderRadius: 20,
+                backgroundColor: T.card, borderWidth: HAIRLINE, borderColor: T.border,
+                alignItems: 'center', justifyContent: 'center',
+              }}
             >
-              <Bell size={20} color="#2D3748" />
+              <Bell size={19} color={T.text} />
             </Pressable>
           </View>
 
-          {/* Welcome message — one line */}
-          <Text className="px-4 pt-3 pb-1 text-2xl font-bold text-neutral-800" numberOfLines={1}>
-            {getGreeting()}, {firstName} 👋
-          </Text>
+          {/* Welcome message — one line, with the brand wave icon */}
+          <View className="flex-row items-center px-4 pt-3 pb-1 gap-2">
+            <Text style={{ fontSize: 24, fontWeight: '700', color: T.text, flexShrink: 1 }} numberOfLines={1}>
+              {getGreeting()}, {firstName}
+            </Text>
+            <Image source={HANDWAVE} style={{ width: 32, height: 32 }} resizeMode="contain" />
+          </View>
 
-          {/* Floating search bar — tapping opens the Search screen */}
+          {/* Search — Layer 2 recessed well, reads as interactive */}
           <Pressable
             onPress={() => router.push('/(client)/(tabs)/search' as never)}
-            className="mx-4 mt-3 mb-4 flex-row items-center bg-white rounded-2xl px-4 py-4 gap-3 active:opacity-80"
-            style={{
-              shadowColor: '#3c3cb9', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.14, shadowRadius: 14, elevation: 6,
-            }}
+            className="mx-4 mt-4 mb-4 flex-row items-center rounded-2xl px-4 py-4 gap-3 active:opacity-80"
+            style={{ backgroundColor: T.input, borderWidth: HAIRLINE, borderColor: T.border }}
           >
-            <Search size={18} color="#A0AEC0" />
-            <Text className="text-sm text-neutral-400 flex-1">Find your barber...</Text>
+            <Search size={18} color={T.textFaint} />
+            <Text style={{ flex: 1, fontSize: 14.5, color: T.textFaint }}>Find your barber…</Text>
           </Pressable>
-        </LinearGradient>
+        </View>
 
+        {/* ── Connectivity issue — inline, header + tabs stay visible ── */}
+        {isError && (
+          <View
+            className="mx-4 mt-6 items-center px-6 py-10"
+            style={{ ...cardSurface }}
+          >
+            <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: T.input, alignItems: 'center', justifyContent: 'center' }}>
+              <AlertCircle size={26} color={T.textFaint} />
+            </View>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: T.text, marginTop: 14, textAlign: 'center' }}>
+              Could not load barbers
+            </Text>
+            <Text style={{ fontSize: 13, color: T.textFaint, marginTop: 6, textAlign: 'center', lineHeight: 19 }}>
+              Check your internet connection and try again.
+            </Text>
+            <Pressable
+              onPress={() => refetch()}
+              className="active:opacity-80"
+              style={{ backgroundColor: T.accent, borderRadius: 999, paddingHorizontal: 28, paddingVertical: 12, marginTop: 18 }}
+            >
+              <Text style={{ color: T.onAccent, fontWeight: '700', fontSize: 13.5 }}>Retry</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {!isError && (
+        <>
         {/* ── Recommended — top-rated barbers ───────────────────── */}
         <View className="mb-7 mt-2">
           <View className="flex-row items-center justify-between px-4 mb-3">
             <View className="flex-row items-center gap-1.5">
-              <Star size={16} color="#fdb276" fill="#fdb276" />
-              <Text className="text-lg font-bold text-neutral-800">Recommended</Text>
+              <StarIcon size={15} />
+              <Text style={{ fontSize: 17.5, fontWeight: '700', color: T.text }}>Recommended</Text>
             </View>
             <Pressable onPress={() => router.push('/(client)/(tabs)/search' as never)}>
-              <Text className="text-sm text-accent font-medium">See all</Text>
+              <Text style={{ fontSize: 13.5, color: T.accent, fontWeight: '600' }}>See all</Text>
             </Pressable>
           </View>
           <PeekCarousel
@@ -237,11 +259,11 @@ export default function HomeScreen() {
         <View className="mb-4">
           <View className="flex-row items-center justify-between px-4 mb-3">
             <View className="flex-row items-center gap-1.5">
-              <Navigation size={15} color="#3c3cb9" />
-              <Text className="text-lg font-bold text-neutral-800">Nearby</Text>
+              <Navigation size={14} color={T.textFaint} />
+              <Text style={{ fontSize: 17.5, fontWeight: '700', color: T.text }}>Nearby</Text>
             </View>
             <Pressable onPress={() => router.push('/(client)/(tabs)/search' as never)}>
-              <Text className="text-sm text-accent font-medium">See all</Text>
+              <Text style={{ fontSize: 13.5, color: T.accent, fontWeight: '600' }}>See all</Text>
             </Pressable>
           </View>
           {coordinates ? (
@@ -252,18 +274,13 @@ export default function HomeScreen() {
               cardW={CARD_W}
             />
           ) : (
-            <View className="mx-4 rounded-2xl overflow-hidden">
-              <LinearGradient
-                colors={['#f1f3ff', '#faf6ff']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={{ padding: 18, flexDirection: 'row', alignItems: 'center', gap: 12 }}
-              >
-                <MapPin size={20} color="#3c3cb9" />
-                <Text style={{ flex: 1, fontSize: 13, color: '#464554', lineHeight: 19 }}>
-                  Allow location access so we can show barbershops and mobile barbers close to you.
-                </Text>
-              </LinearGradient>
+            <View className="mx-4" style={{ ...cardSurface, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: T.accentWash, alignItems: 'center', justifyContent: 'center' }}>
+                <MapPin size={18} color={T.accent} />
+              </View>
+              <Text style={{ flex: 1, fontSize: 13, color: T.textMuted, lineHeight: 19 }}>
+                Allow location access so we can show barbershops and mobile barbers close to you.
+              </Text>
             </View>
           )}
         </View>
@@ -272,8 +289,8 @@ export default function HomeScreen() {
         {recentlyViewed.length > 0 && (
           <View className="mb-4">
             <View className="flex-row items-center gap-1.5 px-4 mb-3">
-              <History size={15} color="#8a89a3" />
-              <Text className="text-lg font-bold text-neutral-800">Recently Viewed</Text>
+              <History size={14} color={T.textFaint} />
+              <Text style={{ fontSize: 17.5, fontWeight: '700', color: T.text }}>Recently Viewed</Text>
             </View>
             <PeekCarousel
               data={recentlyViewed}
@@ -283,7 +300,9 @@ export default function HomeScreen() {
             />
           </View>
         )}
-      </ScrollView>
+        </>
+        )}
+      </Animated.ScrollView>
     </View>
   );
 }

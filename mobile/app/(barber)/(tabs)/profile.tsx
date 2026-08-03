@@ -26,6 +26,7 @@ import {
   Settings2,
   Archive,
   TrendingUp,
+  Navigation,
 } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { useThemeColors, type ThemeColors } from '@/hooks/useThemeColors';
@@ -288,6 +289,20 @@ export default function BarberProfileScreen() {
             <MenuRow c={c} icon={<Star size={20} color={c.textMuted} />} title="Reviews & Ratings" subtitle="Client feedback & scores" onPress={() => router.push('/reviews' as any)} />
             <MenuRow c={c} icon={<CreditCard size={20} color={c.textMuted} />} title="Payout Method" subtitle="Mobile Money & bank payouts" onPress={() => router.push('/payout' as any)} isLast />
           </SectionCard>
+
+          {/* Mobile barbers field travel requests from out-of-range clients */}
+          {barber?.barberType === 'mobile' && (
+            <SectionCard label="Requests" c={c}>
+              <MenuRow
+                c={c}
+                icon={<Navigation size={20} color={c.textMuted} />}
+                title="Travel Requests"
+                subtitle="Clients outside your travel range"
+                onPress={() => router.push('/booking-requests' as any)}
+                isLast
+              />
+            </SectionCard>
+          )}
 
           <SectionCard label="Work" c={c}>
             <MenuRow c={c} icon={<Scissors size={20} color={c.textMuted} />} title="Services" subtitle="Manage your services & pricing" onPress={() => router.push('/services' as any)} />

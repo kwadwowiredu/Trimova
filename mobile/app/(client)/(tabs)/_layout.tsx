@@ -1,21 +1,25 @@
 import { Platform } from 'react-native';
 import { Tabs } from 'expo-router';
-import { Home, Search, Calendar, User } from 'lucide-react-native';
+import { Home, Search, Calendar } from 'lucide-react-native';
 import { useRefreshSignal } from '@/stores/refreshSignal';
+import { AvatarTabIcon } from '@/components/ui/AvatarTabIcon';
+import { tapSelect } from '@/utils/haptics';
+import { T, HAIRLINE } from '@/constants/clientTheme';
 
-type TabIconProps = { color: string; size: number };
+type TabIconProps = { color: string; size: number; focused: boolean };
 
 export default function ClientTabsLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#fdb276',
-        tabBarInactiveTintColor: '#A0AEC0',
+        // Accent restraint: the active tab is one of the few accent moments.
+        tabBarActiveTintColor: T.accent,
+        tabBarInactiveTintColor: T.textFaint,
         tabBarStyle: {
-          backgroundColor: '#ffffff',
-          borderTopColor: '#E2E8F0',
-          borderTopWidth: 1,
+          backgroundColor: T.card,
+          borderTopColor: T.border,
+          borderTopWidth: HAIRLINE,
           paddingTop: 6,
           // Respect the iOS home indicator
           height: Platform.OS === 'ios' ? 84 : 62,
@@ -26,6 +30,8 @@ export default function ClientTabsLayout() {
           fontWeight: '500',
         },
       }}
+      // Subtle haptic tick on every tab switch.
+      screenListeners={{ tabPress: () => tapSelect() }}
     >
       <Tabs.Screen
         name="index"
@@ -65,8 +71,9 @@ export default function ClientTabsLayout() {
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color, size }: TabIconProps) => (
-            <User size={size} color={color} />
+          // The user's own photo instead of a generic person icon.
+          tabBarIcon: ({ color, size, focused }: TabIconProps) => (
+            <AvatarTabIcon color={color} size={size} focused={focused} />
           ),
         }}
       />

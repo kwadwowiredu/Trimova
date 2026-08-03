@@ -6,6 +6,7 @@ import appleSignin from 'apple-signin-auth';
 import { v4 as uuidv4 } from 'uuid';
 import { getSupabase } from '../utils/supabase';
 import { sendSuccess, sendError } from '../utils/response';
+import { sendEmail, passwordResetEmail } from '../utils/email';
 import type { UserRole } from '../types/index';
 
 const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS ?? '12', 10);
@@ -378,8 +379,11 @@ export const authController = {
       expires_at: expiresAt.toISOString(),
     });
 
-    // TODO: Send email with reset link: `${FRONTEND_URL}/reset-password?token=${token}`
-    console.log(`[Dev] Password reset token for ${email}: ${token}`);
+    const resetUrl = `${process.env.APP_URL ?? 'trimova://'}reset-password?token=${token}`;
+    const mail = passwordResetEmail(user.full_name ?? 'there', resetUrl, token);
+    // Awaited but never fatal — a mail failure must not reveal whether the
+    // address exists, and must not fail the request.
+    await sendEmail({ to: email.toLowerCase().trim(), ...mail });
 
     sendSuccess(res, null, 'If that email exists, a reset link has been sent.');
   },

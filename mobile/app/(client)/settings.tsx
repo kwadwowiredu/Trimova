@@ -22,7 +22,7 @@ function Row({ icon, label, subtitle, danger, onPress, isLast = false }: {
   return (
     <>
       <Pressable onPress={onPress} className="flex-row items-center px-4 py-4 gap-3 active:bg-neutral-50">
-        <View className="w-9 h-9 rounded-xl items-center justify-center" style={{ backgroundColor: danger ? '#FED7D7' : '#F4F5FA' }}>
+        <View className="w-9 h-9 items-center justify-center">
           {icon}
         </View>
         <View className="flex-1">
@@ -79,12 +79,12 @@ export default function ClientSettingsScreen() {
         <Pressable onPress={() => router.back()} hitSlop={10}>
           <ChevronLeft size={26} color="#161c27" />
         </Pressable>
-        <Text style={{ flex: 1, fontSize: 18, fontWeight: '800', color: '#161c27' }}>Settings</Text>
+        <Text style={{ flex: 1, fontSize: 18, fontWeight: '600', color: '#023047' }}>Settings</Text>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingVertical: 12, paddingBottom: 40 }}>
         <Row
-          icon={<FileText size={17} color="#3182CE" />}
+          icon={<FileText size={17} color="#718096" />}
           label="Privacy Policy"
           subtitle="How Trimova handles your data"
           onPress={() =>
@@ -94,7 +94,7 @@ export default function ClientSettingsScreen() {
           }
         />
         <Row
-          icon={<Moon size={17} color="#3c3cb9" />}
+          icon={<Moon size={17} color="#718096" />}
           label="Appearance"
           subtitle="Light theme (dark mode coming to the client app soon)"
           onPress={() => Alert.alert('Appearance', 'Theme options for the client experience are coming soon.')}
@@ -104,7 +104,7 @@ export default function ClientSettingsScreen() {
           label="Delete Account"
           subtitle="Permanently remove your account & data"
           danger
-          onPress={() => setShowDelete(true)}
+          onPress={() => router.push('/(client)/delete-account' as never)}
         />
         <Row
           icon={<LogOut size={17} color="#E53E3E" />}

@@ -1,28 +1,42 @@
 import { api } from './api';
-import type { ApiResponse } from '@/types/api';
-import type { StaffBarber } from '@/types/user';
+import type { ApiResponse, AuthResponse } from '@/types/api';
 
-export interface CreateStaffPayload {
+export type InviteStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
+
+export interface StaffInvite {
+  id: string;
   fullName: string;
   email: string;
-  phone: string;
-  password: string;
-  specialties?: string[];
+  phone: string | null;
+  code: string;
+  status: InviteStatus;
+  expiresAt: string;
+  acceptedAt: string | null;
+  createdAt: string;
+}
+
+export interface InviteLookup {
+  fullName: string;
+  email: string;
+  shopName: string;
+  expiresAt: string;
 }
 
 export const staffService = {
-  getAll: () =>
-    api.get<ApiResponse<StaffBarber[]>>('/staff'),
+  // ── Shop owner ───────────────────────────────────────────────
+  invite: (payload: { fullName: string; email: string; phone?: string }) =>
+    api.post<ApiResponse<{ invite: StaffInvite; emailSent: boolean; emailSimulated: boolean }>>(
+      '/staff/invites', payload,
+    ),
 
-  create: (payload: CreateStaffPayload) =>
-    api.post<ApiResponse<StaffBarber>>('/staff', payload),
+  listInvites: () => api.get<ApiResponse<StaffInvite[]>>('/staff/invites'),
 
-  update: (id: string, payload: Partial<Pick<StaffBarber, 'fullName' | 'phone' | 'specialties'>>) =>
-    api.put<ApiResponse<StaffBarber>>(`/staff/${id}`, payload),
+  revokeInvite: (id: string) => api.delete<ApiResponse<null>>(`/staff/invites/${id}`),
 
-  toggleActive: (id: string) =>
-    api.patch<ApiResponse<StaffBarber>>(`/staff/${id}/toggle`),
+  // ── Invitee (public — they don't have an account yet) ────────
+  lookupInvite: (params: { code?: string; token?: string }) =>
+    api.get<ApiResponse<InviteLookup>>('/staff/invites/lookup', { params }),
 
-  resetPassword: (id: string) =>
-    api.post<ApiResponse<{ newPassword: string }>>(`/staff/${id}/reset-password`),
+  acceptInvite: (payload: { code?: string; token?: string; email: string; password: string }) =>
+    api.post<ApiResponse<AuthResponse>>('/staff/invites/accept', payload),
 };

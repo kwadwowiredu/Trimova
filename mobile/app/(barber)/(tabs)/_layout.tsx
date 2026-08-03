@@ -1,9 +1,11 @@
 import { Platform } from 'react-native';
 import { Tabs } from 'expo-router';
-import { HomeIcon, CalendarCheck, Users, User } from 'lucide-react-native';
+import { HomeIcon, CalendarCheck, Users } from 'lucide-react-native';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { useAuthStore } from '@/stores/authStore';
 import { useRefreshSignal } from '@/stores/refreshSignal';
+import { AvatarTabIcon } from '@/components/ui/AvatarTabIcon';
+import { tapSelect } from '@/utils/haptics';
 import type { BarberProfile } from '@/types/user';
 
 export default function BarberTabsLayout() {
@@ -30,6 +32,8 @@ export default function BarberTabsLayout() {
           fontWeight: '600',
         },
       }}
+      // Subtle haptic tick on every tab switch.
+      screenListeners={{ tabPress: () => tapSelect() }}
     >
       <Tabs.Screen
         name="index"
@@ -64,7 +68,8 @@ export default function BarberTabsLayout() {
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color }) => <User size={22} color={color} />,
+          // The barber's own photo instead of a generic person icon.
+          tabBarIcon: ({ color, focused }) => <AvatarTabIcon color={color} size={22} focused={focused} />,
         }}
       />
     </Tabs>

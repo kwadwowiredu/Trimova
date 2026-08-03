@@ -9,11 +9,27 @@ import type { BarberProfile } from '@/types/user';
  * A barber's public profile is "search-ready" once it has a photo, at least one
  * portfolio image, and a business name. Until then they won't show in client
  * search — hence the persistent nudge banner.
+ *
+ * Mobile/freelance barbers additionally need a base location and a travel
+ * radius: without them the distance search can't place them at all, so their
+ * profile is just as unusable as one missing a photo.
  */
 export function isProfileIncomplete(user: unknown): boolean {
-  const b = user as (BarberProfile & { avatarUrl?: string | null }) | null;
+  const b = user as (BarberProfile & {
+    avatarUrl?: string | null;
+    onboardingComplete?: boolean;
+    serviceRadius?: number | null;
+    location?: unknown;
+  }) | null;
   if (!b) return false;
-  return !b.avatarUrl || !(b.portfolioImages?.length) || !b.businessName;
+
+  const missingBasics = !b.avatarUrl || !(b.portfolioImages?.length) || !b.businessName;
+  if (missingBasics) return true;
+
+  if (b.barberType === 'mobile') {
+    return !b.location || !b.serviceRadius;
+  }
+  return false;
 }
 
 /**

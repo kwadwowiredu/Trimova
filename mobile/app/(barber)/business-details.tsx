@@ -203,18 +203,31 @@ export default function BusinessDetailsScreen() {
   }
 
   // Turn dropped-pin coordinates into a human-readable address.
+  // Most-specific fields first: the OS geocoder's `district` in Ghana is the
+  // constituency (e.g. "Oforikrom" for a pin in Ayeduase), so leading with it
+  // would replace the neighbourhood the user actually picked.
   async function applyPinLocation(lat: number, lng: number) {
     setCoords({ lat, lng });
+    const fallback = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
     try {
       const [geo] = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
       if (geo) {
-        const label = [geo.name, geo.street, geo.city, geo.region].filter(Boolean).join(', ');
-        setSelectedLabel(label || `${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+        const specific = [geo.name, geo.street].find((v) => v && !/^\d+$/.test(v));
+        const parts = [specific, geo.district || geo.subregion, geo.city]
+          .filter((v): v is string => !!v && v.trim().length > 0);
+        const seen = new Set<string>();
+        const unique = parts.filter((p) => {
+          const k = p.toLowerCase();
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+        setSelectedLabel(unique.slice(0, 2).join(', ') || fallback);
       } else {
-        setSelectedLabel(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+        setSelectedLabel(fallback);
       }
     } catch {
-      setSelectedLabel(`${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+      setSelectedLabel(fallback);
     }
   }
 
