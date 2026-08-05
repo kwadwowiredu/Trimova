@@ -1,42 +1,37 @@
 import { useState } from 'react';
-import { View, Text, FlatList, Pressable } from 'react-native';
+import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery } from '@tanstack/react-query';
 import { CalendarX } from 'lucide-react-native';
 import { BookingCard, type Booking } from '@/components/barber/BookingCard';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { bookingsService } from '@/services/bookings';
+import type { Booking as ApiBooking } from '@/types/booking';
 
 const TABS = ['Upcoming', 'Completed', 'Cancelled'] as const;
 type TabName = (typeof TABS)[number];
 
-// Mock until the bookings API exists — these are only THIS staff member's.
-const MOCK: Booking[] = [
-  {
-    id: '1', clientName: 'Ama Osei', clientAvatar: null, serviceName: 'Executive Fade',
-    status: 'confirmed',
-    startTime: new Date(new Date().setHours(10, 0, 0, 0)).toISOString(),
-    endTime: new Date(new Date().setHours(10, 45, 0, 0)).toISOString(),
-    locationAddress: 'In shop',
-  },
-  {
-    id: '2', clientName: 'Kwesi Poku', clientAvatar: null, serviceName: 'Beard Trim',
-    status: 'pending',
-    startTime: new Date(new Date().setHours(11, 30, 0, 0)).toISOString(),
-    endTime: new Date(new Date().setHours(11, 50, 0, 0)).toISOString(),
-    locationAddress: 'In shop',
-  },
-  {
-    id: '3', clientName: 'Yaw Owusu', clientAvatar: null, serviceName: 'Skin Fade',
-    status: 'completed',
-    startTime: new Date(Date.now() - 86_400_000).toISOString(),
-    endTime: new Date(Date.now() - 86_400_000 + 1_800_000).toISOString(),
-    locationAddress: 'In shop',
-  },
-];
+function toCardBooking(b: ApiBooking): Booking {
+  return {
+    id: b.id,
+    clientName: b.clientName,
+    clientAvatar: b.clientAvatarUrl,
+    serviceName: b.serviceName,
+    status: b.status,
+    startTime: b.scheduledAt,
+    endTime: b.endsAt,
+    locationAddress: b.clientLocation?.address ?? 'In shop',
+  };
+}
 
 function filterFor(tab: TabName, list: Booking[]) {
-  if (tab === 'Upcoming')  return list.filter((b) => b.status === 'confirmed' || b.status === 'pending');
+  if (tab === 'Upcoming') {
+    return list.filter((b) =>
+      b.status === 'confirmed' || b.status === 'pending' || b.status === 'in_progress',
+    );
+  }
   if (tab === 'Completed') return list.filter((b) => b.status === 'completed');
-  return list.filter((b) => b.status === 'cancelled');
+  return list.filter((b) => b.status === 'cancelled' || b.status === 'declined');
 }
 
 /** A staff barber's own bookings — no shop-wide view, no batch admin tools. */
@@ -44,7 +39,14 @@ export default function StaffBookingsScreen() {
   const insets = useSafeAreaInsets();
   const c = useThemeColors();
   const [tab, setTab] = useState<TabName>('Upcoming');
-  const list = filterFor(tab, MOCK);
+
+  // The API narrows this to the signed-in staff member's own appointments.
+  const { data, isLoading, isRefetching, refetch } = useQuery({
+    queryKey: ['bookings', 'staff'],
+    queryFn: () => bookingsService.getBarberBookings({ page: 1 }),
+  });
+
+  const list = filterFor(tab, (data?.data.data ?? []).map(toCardBooking));
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
@@ -72,23 +74,32 @@ export default function StaffBookingsScreen() {
         })}
       </View>
 
-      <FlatList
-        data={list}
-        keyExtractor={(b) => b.id}
-        contentContainerStyle={{ padding: 16, paddingBottom: 40, flexGrow: 1 }}
-        renderItem={({ item }) => (
-          <View style={{ marginBottom: 12 }}>
-            <BookingCard booking={item} />
-          </View>
-        )}
-        ListEmptyComponent={
-          <View style={{ alignItems: 'center', paddingTop: 70, gap: 10 }}>
-            <CalendarX size={44} color={c.textFaint} />
-            <Text style={{ fontSize: 15, fontWeight: '700', color: c.textMuted }}>Nothing here yet</Text>
-            <Text style={{ fontSize: 13, color: c.textFaint }}>Your {tab.toLowerCase()} appointments will show up here.</Text>
-          </View>
-        }
-      />
+      {isLoading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={c.accent} />
+        </View>
+      ) : (
+        <FlatList
+          data={list}
+          keyExtractor={(b) => b.id}
+          contentContainerStyle={{ padding: 16, paddingBottom: 40, flexGrow: 1 }}
+          refreshControl={
+            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={c.accent} />
+          }
+          renderItem={({ item }) => (
+            <View style={{ marginBottom: 12 }}>
+              <BookingCard booking={item} />
+            </View>
+          )}
+          ListEmptyComponent={
+            <View style={{ alignItems: 'center', paddingTop: 70, gap: 10 }}>
+              <CalendarX size={44} color={c.textFaint} />
+              <Text style={{ fontSize: 15, fontWeight: '700', color: c.textMuted }}>Nothing here yet</Text>
+              <Text style={{ fontSize: 13, color: c.textFaint }}>Your {tab.toLowerCase()} appointments will show up here.</Text>
+            </View>
+          }
+        />
+      )}
     </View>
   );
 }

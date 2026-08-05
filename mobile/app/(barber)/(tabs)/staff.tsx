@@ -13,8 +13,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { UserPlus, Star, X, Bell, Ticket, Copy, Trash2 } from 'lucide-react-native';
-import { ActivityIndicator, Share, Alert } from 'react-native';
+import { UserPlus, Star, X, Bell, Ticket, Mail, Trash2 } from 'lucide-react-native';
+import { ActivityIndicator, Alert } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { staffService, type StaffInvite } from '@/services/staff';
 import { getApiErrorMessage } from '@/services/api';
@@ -113,18 +113,32 @@ function AddStaffModal({ visible, onClose, onInvited }: {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <Pressable style={{ flex: 1, backgroundColor: c.overlay }} onPress={handleClose} />
+      {/*
+        The sheet lives INSIDE a flex-1 KeyboardAvoidingView with a flexible
+        spacer above it. Previously it was absolutely positioned with
+        behavior="height", which made the keyboard shove the whole sheet far up
+        the screen. Now the keyboard only takes the space it needs and the form
+        scrolls within a capped-height sheet.
+      */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <Pressable style={{ flex: 1, backgroundColor: c.overlay }} onPress={handleClose} />
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="absolute bottom-0 left-0 right-0">
-        <View style={{ backgroundColor: c.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingTop: 12 }}>
+        <View style={{ backgroundColor: c.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingTop: 12, maxHeight: '86%' }}>
           {/* Handle */}
-          <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 20 }} />
+          <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: c.border, alignSelf: 'center', marginBottom: 16 }} />
 
           {/* Header */}
-          <View className="flex-row items-center justify-between px-5 mb-6">
-            <Text style={{ fontSize: 22, fontWeight: '600', color: c.text }}>Add Team Member</Text>
-            <Pressable onPress={handleClose} hitSlop={12}>
-              <X size={24} color={c.textMuted} />
+          <View className="flex-row items-center justify-between px-5 mb-5">
+            <Text style={{ fontSize: 21, fontWeight: '700', color: c.text }}>Add Team Member</Text>
+            <Pressable
+              onPress={handleClose}
+              hitSlop={12}
+              style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <X size={19} color={c.textMuted} />
             </Pressable>
           </View>
 
@@ -138,8 +152,8 @@ function AddStaffModal({ visible, onClose, onInvited }: {
               {/* Info banner */}
               <View style={{ borderRadius: 16, padding: 16, backgroundColor: '#dfe7fd' }}>
                 <Text style={{ fontSize: 14, color: '#003049', lineHeight: 22 }}>
-                  We'll email them an invite link plus a join code. The invite only works with
-                  this email address, expires in 7 days, and you can revoke it any time.
+                  We'll email them a link to join. It only works with this email address,
+                  expires in 7 days, and you can revoke it any time.
                 </Text>
               </View>
             </View>
@@ -332,25 +346,29 @@ export default function BarberStaffScreen() {
     queryClient.invalidateQueries({ queryKey: ['staff', 'invites'] });
   }
 
-  /** Show the code straight after inviting, so it can be shared in person. */
   function handleInvited(invite: StaffInvite, emailSent: boolean) {
     refreshInvites();
     Alert.alert(
       emailSent ? 'Invitation sent' : 'Invitation created',
-      `${emailSent
-        ? `We emailed ${invite.email} a join link and this code.`
-        : `Email isn't configured yet, so share this code with ${invite.fullName} directly.`}\n\nCode: ${invite.code}\n\nIt only works with their email address and expires in 7 days.`,
-      [
-        { text: 'Done' },
-        { text: 'Share code', onPress: () => shareInvite(invite) },
-      ],
+      emailSent
+        ? `We emailed ${invite.email} a link to join. It expires in 7 days and only works with that address.`
+        : `The invite was saved, but the email couldn't be sent. Check the API server logs, then use Resend on the pending invite.`,
     );
   }
 
-  async function shareInvite(invite: StaffInvite) {
-    await Share.share({
-      message: `Hi ${invite.fullName}, join our shop on Trimova.\n\nOpen the app, tap "I have an invite code" and enter: ${invite.code}\n\nUse the email ${invite.email} to sign up. The code expires in 7 days.`,
-    });
+  async function resend(invite: StaffInvite) {
+    try {
+      const res = await staffService.resendInvite(invite.id);
+      refreshInvites();
+      Alert.alert(
+        res.data.data.emailSent ? 'Email resent' : 'Could not send',
+        res.data.data.emailSent
+          ? `We sent another invitation to ${invite.email}.`
+          : 'Email is not configured — check the API server logs.',
+      );
+    } catch (e) {
+      Alert.alert('Failed', getApiErrorMessage(e) || "Couldn't resend the invitation.");
+    }
   }
 
   function confirmRevoke(invite: StaffInvite) {
@@ -493,14 +511,13 @@ export default function BarberStaffScreen() {
                     </Pressable>
                   </View>
 
-                  <Pressable
-                    onPress={() => shareInvite(inv)}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surfaceAlt, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, marginTop: 12 }}
-                  >
-                    <Text style={{ flex: 1, fontSize: 15, fontWeight: '800', letterSpacing: 2, color: c.text }}>{inv.code}</Text>
-                    <Copy size={15} color={c.accent} />
-                    <Text style={{ fontSize: 12.5, fontWeight: '700', color: c.accent }}>Share</Text>
-                  </Pressable>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surfaceAlt, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, marginTop: 12 }}>
+                    <Mail size={14} color={c.textFaint} />
+                    <Text style={{ flex: 1, fontSize: 12.5, color: c.textMuted }}>Invitation email sent</Text>
+                    <Pressable onPress={() => resend(inv)} hitSlop={8}>
+                      <Text style={{ fontSize: 12.5, fontWeight: '700', color: c.accent }}>Resend</Text>
+                    </Pressable>
+                  </View>
                 </View>
               ))}
             </View>

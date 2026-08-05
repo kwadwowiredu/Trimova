@@ -31,6 +31,7 @@ import { authService } from '@/services/auth';
 import { getApiErrorMessage } from '@/services/api';
 import { uploadImage, isLocalUri } from '@/services/uploads';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { barberProfileLink } from '@/utils/constants';
 import { Image } from 'react-native';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -152,7 +153,7 @@ export default function PersonalInfoScreen() {
   };
   const initials  = safeInitials(name);
   const barberId  = user?.id ?? 'demo';
-  const profileLink = `trimova.app/b/${barberId}`;
+  const profileLink = barberProfileLink(barberId);
 
   function showToast(msg: string, ok: boolean) {
     setToastMsg(msg);

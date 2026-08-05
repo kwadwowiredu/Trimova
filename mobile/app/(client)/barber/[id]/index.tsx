@@ -25,13 +25,13 @@ import {
   Share2, X, Phone, Clock,
 } from 'lucide-react-native';
 import { T, HAIRLINE } from '@/constants/clientTheme';
-import { StarIcon, StarRating } from '@/components/ui/Icons';
 import { barbersService } from '@/services/barbers';
 import { useClientBrowseStore } from '@/stores/clientBrowseStore';
 import { chip } from '@/constants/clientTheme';
 import { MOCK_SHOP_STAFF, MOCK_SHOP_REVIEWS } from '@/utils/mockShopData';
 import { ReviewRow } from '@/components/barber/ReviewRow';
 import { tapLight, tapSelect, tapMedium } from '@/utils/haptics';
+import { barberProfileLink } from '@/utils/constants';
 import type { BarberProfile, BarberListItem } from '@/types/user';
 
 interface BarberService {
@@ -93,6 +93,16 @@ function openStatus(hours: OpeningDay[] | null | undefined): { text: string; ope
   return { text: `Open now · closes ${fmt12(today.closeTime)}`, open: true };
 }
 
+function Stars({ value, size = 14 }: { value: number; size?: number }) {
+  return (
+    <View style={{ flexDirection: 'row', gap: 1 }}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <Star key={i} size={size} color={T.star} fill={value >= i - 0.25 ? T.star : 'transparent'} />
+      ))}
+    </View>
+  );
+}
+
 /** Frosty translucent circular icon button (hero overlay controls). */
 function GlassButton({ onPress, children }: { onPress: () => void; children: React.ReactNode }) {
   return (
@@ -129,7 +139,7 @@ function StaffFaceCard({ name, role, rating, avatarUrl, onPress }: {
         )}
         {/* Rating pill overlapping the photo's bottom edge */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#ffffff', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginTop: -14, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 5, elevation: 3 }}>
-          <StarIcon size={12} />
+          <Star size={12} color={T.star} fill={T.star} />
           <Text style={{ fontSize: 13, fontWeight: '800', color: T.text }}>{rating.toFixed(1)}</Text>
         </View>
       </View>
@@ -250,7 +260,7 @@ export default function ClientBarberDetailScreen() {
 
   async function handleShare() {
     tapLight();
-    await Share.share({ message: `Check out ${title} on Trimova: trimova.app/b/${id}` });
+    await Share.share({ message: `Check out ${title} on Trimova: ${barberProfileLink(id!)}` });
   }
 
   function handleBack() {
@@ -430,7 +440,7 @@ export default function ClientBarberDetailScreen() {
               <Text style={{ fontSize: 16, fontWeight: '800', color: T.text }}>
                 {barber.rating > 0 ? barber.rating.toFixed(1) : '–'}
               </Text>
-              <StarRating value={barber.rating} />
+              <Stars value={barber.rating} />
               <Text style={{ fontSize: 14, fontWeight: '700', color: T.accent }}>({barber.reviewCount})</Text>
             </View>
 

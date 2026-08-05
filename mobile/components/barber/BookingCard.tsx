@@ -4,7 +4,13 @@ import { format, isToday, isTomorrow } from 'date-fns';
 import { Avatar } from '@/components/ui/Avatar';
 import { useThemeColors } from '@/hooks/useThemeColors';
 
-export type BookingStatus = 'confirmed' | 'pending' | 'completed' | 'cancelled';
+export type BookingStatus =
+  | 'confirmed'
+  | 'pending'
+  | 'in_progress'
+  | 'completed'
+  | 'cancelled'
+  | 'declined';
 
 export interface Booking {
   id: string;
@@ -32,10 +38,12 @@ interface BookingCardProps {
 
 function statusConfig(isDark: boolean): Record<BookingStatus, { label: string; bg: string; text: string }> {
   return {
-    confirmed: { label: 'Confirmed', bg: isDark ? '#3A2E12' : '#FFF3DC', text: isDark ? '#F6C36B' : '#B7791F' },
-    pending:   { label: 'Pending',   bg: isDark ? '#1E2A40' : '#EBF4FF', text: isDark ? '#90CDF4' : '#2B6CB0' },
-    completed: { label: 'Completed', bg: isDark ? '#16271C' : '#F0FFF4', text: isDark ? '#68D391' : '#276749' },
-    cancelled: { label: 'Cancelled', bg: isDark ? '#3A1B1B' : '#FFF5F5', text: isDark ? '#FC8181' : '#C53030' },
+    confirmed:   { label: 'Confirmed',   bg: isDark ? '#3A2E12' : '#FFF3DC', text: isDark ? '#F6C36B' : '#B7791F' },
+    pending:     { label: 'Pending',     bg: isDark ? '#1E2A40' : '#EBF4FF', text: isDark ? '#90CDF4' : '#2B6CB0' },
+    in_progress: { label: 'In progress', bg: isDark ? '#1E2A40' : '#EBF4FF', text: isDark ? '#90CDF4' : '#2B6CB0' },
+    completed:   { label: 'Completed',   bg: isDark ? '#16271C' : '#F0FFF4', text: isDark ? '#68D391' : '#276749' },
+    cancelled:   { label: 'Cancelled',   bg: isDark ? '#3A1B1B' : '#FFF5F5', text: isDark ? '#FC8181' : '#C53030' },
+    declined:    { label: 'Declined',    bg: isDark ? '#3A1B1B' : '#FFF5F5', text: isDark ? '#FC8181' : '#C53030' },
   };
 }
 

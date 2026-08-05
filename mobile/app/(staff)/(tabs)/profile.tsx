@@ -9,6 +9,7 @@ import {
 import { useAuthStore } from '@/stores/authStore';
 import { useThemeColors, type ThemeColors } from '@/hooks/useThemeColors';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { SupportIdCard } from '@/components/ui/SupportIdCard';
 
 function Row({ icon, title, subtitle, onPress, isLast, c }: {
   icon: React.ReactNode; title: string; subtitle: string;
@@ -98,6 +99,18 @@ export default function StaffProfileScreen() {
               Payouts, shop-wide statistics, staff management and business settings are handled
               by the shop owner.
             </Text>
+          </View>
+
+          {/* Account identifier — sits just above the destructive action */}
+          <View style={{ marginTop: 20 }}>
+            <SupportIdCard
+              surface={c.surface}
+              border={c.border}
+              text={c.text}
+              muted={c.textFaint}
+              accent={c.accent}
+              wash={c.surfaceAlt}
+            />
           </View>
 
           <Pressable

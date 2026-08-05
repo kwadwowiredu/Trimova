@@ -10,13 +10,23 @@ import uploadRoutes from './routes/uploads';
 import servicesRoutes from './routes/services';
 import workingHoursRoutes from './routes/workingHours';
 import staffRoutes from './routes/staff';
+import bookingRoutes from './routes/bookings';
+import paymentRoutes from './routes/payments';
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
 
 app.use(helmet());
 app.use(cors({ origin: '*' }));
-app.use(express.json({ limit: '10mb' }));
+// Paystack signs the RAW webhook body, so keep a copy before parsing reshapes it.
+app.use(
+  express.json({
+    limit: '10mb',
+    verify: (req, _res, buf) => {
+      (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
@@ -30,6 +40,8 @@ app.use('/api/uploads', uploadRoutes);
 app.use('/api/services', servicesRoutes);
 app.use('/api/working-hours', workingHoursRoutes);
 app.use('/api/staff', staffRoutes);
+app.use('/api/bookings', bookingRoutes);
+app.use('/api/payments', paymentRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

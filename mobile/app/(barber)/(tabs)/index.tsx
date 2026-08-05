@@ -20,6 +20,9 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { CompleteProfileBanner, isProfileIncomplete } from '@/components/barber/CompleteProfileBanner';
 import { useRefreshSignal } from '@/stores/refreshSignal';
 import { workingHoursService, type DaySchedule } from '@/services/workingHours';
+import { useQuery } from '@tanstack/react-query';
+import { bookingsService } from '@/services/bookings';
+import type { Booking as ApiBooking } from '@/types/booking';
 
 // Turn "HH:MM" into a fractional hour (e.g. "09:30" → 9.5).
 function toHourFloat(t: string): number {
@@ -35,53 +38,31 @@ interface ScheduleEvent extends ICalendarEventBase {
   eventType: 'appointment' | 'break';
 }
 
-// ─── Mock data (replace with useQuery when API is ready) ─────────────────────
+// ─── Appointments → calendar events ──────────────────────────────────────────
 
-const TODAY = new Date();
+/**
+ * A stable colour per booking. Barbers read their day by shape and colour, so
+ * the same appointment must look the same on every render — hashing the id
+ * gives that for free, without storing a colour in the database.
+ */
+const EVENT_COLORS = ['#7C3AED', '#2563EB', '#059669', '#D97706', '#DB2777'];
 
-const MOCK_DB_APPOINTMENTS = [
-  {
-    id: '1',
-    clientName: 'Kwadwo Yiadom',
-    clientAvatar: null as string | null,
-    serviceName: 'Haircut & Beard',
-    startTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 10, 0).toISOString(),
-    endTime:   new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 10, 45).toISOString(),
-    status: 'confirmed' as const,
-    color: '#7C3AED',
-  },
-  {
-    id: '2',
-    clientName: 'Kofi Mensah',
-    clientAvatar: null as string | null,
-    serviceName: 'Executive Fade',
-    startTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 12, 0).toISOString(),
-    endTime:   new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 12, 30).toISOString(),
-    status: 'confirmed' as const,
-    color: '#2563EB',
-  },
-  {
-    id: '3',
-    clientName: 'Ama Asante',
-    clientAvatar: null as string | null,
-    serviceName: 'Beard Trim',
-    startTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 14, 0).toISOString(),
-    endTime:   new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 14, 20).toISOString(),
-    status: 'pending' as const,
-    color: '#059669',
-  },
-];
+function eventColor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return EVENT_COLORS[Math.abs(hash) % EVENT_COLORS.length];
+}
 
 function toScheduleEvents(
-  appointments: typeof MOCK_DB_APPOINTMENTS,
+  appointments: ApiBooking[],
   breaks: ScheduleEvent[] = [],
 ): ScheduleEvent[] {
   return [
     ...appointments.map((a) => ({
       title:       a.clientName,
-      start:       new Date(a.startTime),
-      end:         new Date(a.endTime),
-      color:       a.color,
+      start:       new Date(a.scheduledAt),
+      end:         new Date(a.endsAt),
+      color:       eventColor(a.id),
       serviceName: a.serviceName,
       eventType:   'appointment' as const,
     })),
@@ -527,6 +508,21 @@ export default function BarberHomeScreen() {
 
   const showBanner = isProfileIncomplete(barber);
 
+  /**
+   * The day the barber is looking at. Cancelled and declined bookings are left
+   * out — the calendar shows time that's actually spoken for.
+   */
+  const dateKey = format(selectedDate, 'yyyy-MM-dd');
+  const { data: dayBookings } = useQuery({
+    queryKey: ['bookings', 'barber', dateKey],
+    queryFn: () =>
+      bookingsService.getBarberBookings({
+        date: dateKey,
+        status: 'pending,confirmed,in_progress,completed',
+      }),
+  });
+  const appointments = dayBookings?.data.data ?? [];
+
   // Load this barber's saved working hours so the header + timeline reflect them.
   const loadSchedule = useCallback(async () => {
     try {
@@ -571,7 +567,7 @@ export default function BarberHomeScreen() {
   // Re-mounting BigCalendar on date change resets the scroll position correctly.
   const calendarKey = selectedDate.toDateString();
 
-  const events       = toScheduleEvents(MOCK_DB_APPOINTMENTS, breaks);
+  const events       = toScheduleEvents(appointments, breaks);
   const businessName = barber?.businessName ?? 'My Barbershop';
   const workingHours = isClosedDay
     ? 'Closed'

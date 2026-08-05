@@ -5,7 +5,6 @@ import { BlurView } from 'expo-blur';
 import { Star, MapPin, Scissors, BadgeCheck } from 'lucide-react-native';
 import { tapLight } from '@/utils/haptics';
 import { T, HAIRLINE, softShadow, chip } from '@/constants/clientTheme';
-import { StarIcon } from '@/components/ui/Icons';
 import type { BarberListItem } from '@/types/user';
 
 /**
@@ -57,7 +56,7 @@ export function BarberBannerCard({ barber }: { barber: BarberListItem }) {
           tint="light"
           style={{ position: 'absolute', top: 10, right: 10, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.55)' }}
         >
-          <StarIcon size={11} />
+          <Star size={11} color={T.star} fill={T.star} />
           <Text style={{ color: T.text, fontSize: 12, fontWeight: '700' }}>
             {barber.rating > 0 ? barber.rating.toFixed(1) : '–'}
           </Text>
@@ -103,7 +102,7 @@ export function BarberBannerCard({ barber }: { barber: BarberListItem }) {
 
         {/* Rating · reviews — quiet gray */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
-          <StarIcon size={11} />
+          <Star size={11} color={T.star} fill={T.star} />
           <Text style={{ fontSize: 11.5, color: T.textFaint }}>
             {barber.rating > 0 ? barber.rating.toFixed(1) : '–'}
             {`  (${barber.reviewCount} review${barber.reviewCount === 1 ? '' : 's'})`}

@@ -27,6 +27,7 @@ import {
 import { useAuthStore } from '@/stores/authStore';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { SupportIdCard } from '@/components/ui/SupportIdCard';
 import { authService } from '@/services/auth';
 
 // ─── Mock shops for the workspace switcher ─────────────────────────────────────
@@ -290,6 +291,18 @@ export default function SettingsScreen() {
               subtitle="Change active workspace"
               onPress={() => setShowSwitcher(true)}
               isLast
+            />
+          </View>
+
+          {/* Account identifier for help/support conversations */}
+          <View style={{ marginTop: 12 }}>
+            <SupportIdCard
+              surface={c.surface}
+              border={c.border}
+              text={c.text}
+              muted={c.textFaint}
+              accent={c.accent}
+              wash={c.surfaceAlt}
             />
           </View>
         </View>

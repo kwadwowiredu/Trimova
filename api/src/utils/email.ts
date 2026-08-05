@@ -13,9 +13,12 @@
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
 /**
- * Resend's shared test sender works without domain verification but can only
- * deliver to the address that owns the Resend account. Set EMAIL_FROM to a
- * verified domain (e.g. "Trimova <no-reply@trimova.app>") to mail anyone.
+ * Set EMAIL_FROM to an address on a domain verified in Resend, e.g.
+ * "Trimova <no-reply@trimova.website>". The mailbox part doesn't need a real
+ * inbox — we only send from it.
+ *
+ * The fallback is Resend's shared test sender, which needs no verification but
+ * can ONLY deliver to the address that owns the Resend account.
  */
 const FROM = process.env.EMAIL_FROM ?? 'Trimova <onboarding@resend.dev>';
 
@@ -117,24 +120,24 @@ export function staffInviteEmail(args: {
   staffName: string;
   shopName: string;
   ownerName: string;
-  code: string;
   joinUrl: string;
   expiresInDays: number;
 }) {
-  const { staffName, shopName, ownerName, code, joinUrl, expiresInDays } = args;
+  const { staffName, shopName, ownerName, joinUrl, expiresInDays } = args;
   return {
     subject: `${ownerName} invited you to join ${shopName} on Trimova`,
-    text: `Hi ${staffName},\n\n${ownerName} has invited you to join ${shopName} as a staff barber on Trimova.\n\nJoin here: ${joinUrl}\n\nOr open the Trimova app, choose "I have an invite code", and enter: ${code}\n\nThis invite expires in ${expiresInDays} days and only works with this email address.`,
+    text: `Hi ${staffName},\n\n${ownerName} has invited you to join ${shopName} as a staff barber on Trimova.\n\nTap this link on your phone to accept and set your password:\n${joinUrl}\n\nThis invite expires in ${expiresInDays} days and only works with this email address.`,
     html: layout(`You've been invited to ${shopName}`, `
       <p style="margin:0 0 16px;font-size:15px;color:#464554;line-height:22px;">
         Hi ${staffName}, <strong style="color:#161c27;">${ownerName}</strong> has invited you to join
         <strong style="color:#161c27;">${shopName}</strong> as a staff barber on Trimova.
       </p>
-      <p style="margin:0 0 22px;">${button(joinUrl, 'Accept invitation')}</p>
-      <p style="margin:0 0 8px;font-size:13px;color:#8a89a3;">
-        Or open the Trimova app, tap <strong>"I have an invite code"</strong> and enter:
+      <p style="margin:0 0 10px;font-size:15px;color:#464554;line-height:22px;">
+        Tap below on your phone to accept and choose your password.
       </p>
-      <div style="font-family:ui-monospace,Menlo,monospace;font-size:22px;font-weight:800;letter-spacing:3px;color:#161c27;background:#f1f3ff;border:1px solid #E2E8F8;border-radius:12px;padding:16px;text-align:center;">${code}</div>
+      <p style="margin:0 0 22px;">${button(joinUrl, 'Accept invitation')}</p>
+      <p style="margin:0 0 6px;font-size:13px;color:#8a89a3;">If the button doesn't work, copy this link:</p>
+      <div style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#464554;background:#f1f3ff;border:1px solid #E2E8F8;border-radius:10px;padding:12px 14px;word-break:break-all;">${joinUrl}</div>
       <p style="margin:18px 0 0;font-size:13px;color:#8a89a3;line-height:19px;">
         This invitation expires in ${expiresInDays} days and can only be used with this email address.
       </p>

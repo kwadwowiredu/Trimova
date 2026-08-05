@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getSupabase } from '../utils/supabase';
 import { sendSuccess, sendError } from '../utils/response';
 import { sendEmail, passwordResetEmail } from '../utils/email';
+import { deleteUserStorage } from '../utils/storage';
 import type { UserRole } from '../types/index';
 
 const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS ?? '12', 10);
@@ -554,24 +555,48 @@ export const authController = {
       }
     }
 
-    // Best-effort: remove the user's uploaded images from storage.
-    for (const bucket of ['avatars', 'covers']) {
-      try {
-        const { data: files } = await supabase.storage.from(bucket).list(userId);
-        if (files && files.length) {
-          await supabase.storage.from(bucket).remove(files.map((f) => `${userId}/${f.name}`));
-        }
-      } catch {
-        // ignore storage cleanup failures
-      }
-    }
+    // Storage has no foreign keys, so nothing cascades — the user's files must
+    // be removed explicitly or they stay in the buckets forever.
+    const removedFiles = await deleteUserStorage(userId);
+    console.log(`[Delete Account] storage cleaned for ${userId}:`, removedFiles);
 
     // Delete the user row. barber_profiles + password_reset_tokens cascade.
-    const { error } = await supabase.from('users').delete().eq('id', userId);
-    if (error) {
-      console.error('[Delete Account Error]', error);
-      sendError(res, 'Failed to delete account. Please try again.', 500);
-      return;
+    //
+    // `.select()` matters: without it Supabase reports success even when the
+    // statement matched ZERO rows, which previously let a no-op delete look
+    // like a completed one — leaving the account visible to clients.
+    const { data: deleted, error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', userId)
+      .select('id');
+
+    if (error || !deleted || deleted.length === 0) {
+      console.error('[Delete Account] hard delete did not remove the row:', error ?? 'no rows matched');
+
+      // Fall back to a definitive deactivation so the account is genuinely
+      // unusable and disappears from client search (both filter is_active),
+      // and release the email address so it can be registered again.
+      const { error: deactivateError } = await supabase
+        .from('users')
+        .update({
+          is_active: false,
+          email: `deleted_${userId}@deleted.trimova`,
+          password_hash: null,
+          push_token: null,
+          google_id: null,
+          apple_id: null,
+        })
+        .eq('id', userId);
+
+      if (deactivateError) {
+        console.error('[Delete Account] deactivation fallback failed:', deactivateError);
+        sendError(res, 'We could not delete your account. Please try again.', 500);
+        return;
+      }
+      // The account is now unusable and hidden, so this is a genuine success
+      // for the user even though the row itself survived.
+      console.warn(`[Delete Account] user ${userId} deactivated instead of deleted.`);
     }
 
     sendSuccess(res, null, 'Account deleted.');

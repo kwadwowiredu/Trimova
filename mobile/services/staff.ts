@@ -8,7 +8,6 @@ export interface StaffInvite {
   fullName: string;
   email: string;
   phone: string | null;
-  code: string;
   status: InviteStatus;
   expiresAt: string;
   acceptedAt: string | null;
@@ -33,10 +32,13 @@ export const staffService = {
 
   revokeInvite: (id: string) => api.delete<ApiResponse<null>>(`/staff/invites/${id}`),
 
-  // ── Invitee (public — they don't have an account yet) ────────
-  lookupInvite: (params: { code?: string; token?: string }) =>
+  resendInvite: (id: string) =>
+    api.post<ApiResponse<{ emailSent: boolean; emailSimulated: boolean }>>(`/staff/invites/${id}/resend`),
+
+  // ── Invitee (public — reached from the emailed link) ─────────
+  lookupInvite: (params: { token: string }) =>
     api.get<ApiResponse<InviteLookup>>('/staff/invites/lookup', { params }),
 
-  acceptInvite: (payload: { code?: string; token?: string; email: string; password: string }) =>
+  acceptInvite: (payload: { token: string; email: string; password: string }) =>
     api.post<ApiResponse<AuthResponse>>('/staff/invites/accept', payload),
 };

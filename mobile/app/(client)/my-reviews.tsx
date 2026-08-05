@@ -3,7 +3,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronLeft } from 'lucide-react-native';
-import { StarIcon } from '@/components/ui/Icons';
+import { StarBadge } from '@/components/ui/Icons';
 
 /**
  * Reviews this client has written for barbers. No review system exists yet,
@@ -24,12 +24,7 @@ export default function MyReviewsScreen() {
 
       {/* Empty state */}
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36, paddingBottom: 60 }}>
-        <LinearGradient
-          colors={['#eef0ff', '#faf7ff']}
-          style={{ width: 108, height: 108, borderRadius: 54, alignItems: 'center', justifyContent: 'center' }}
-        >
-          <StarIcon size={44} />
-        </LinearGradient>
+        <StarBadge size={64} />
         <Text style={{ fontSize: 17, fontWeight: '600', color: '#161c27', marginTop: 22, textAlign: 'center' }}>
           No reviews yet
         </Text>

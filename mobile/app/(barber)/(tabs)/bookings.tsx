@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   ScrollView,
   useWindowDimensions,
   TouchableOpacity,
+  RefreshControl,
+  Alert,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -21,62 +23,38 @@ import {
   Bell,
   CalendarX,
   XCircle,
-  Trash2,
   CheckSquare,
   X,
   CheckCircle2,
 } from 'lucide-react-native';
-import { BookingCard, type Booking, type BookingStatus } from '@/components/barber/BookingCard';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { BookingCard, type Booking } from '@/components/barber/BookingCard';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { ListSkeleton } from '@/components/ui/Skeleton';
 import { CompleteProfileBanner, isProfileIncomplete } from '@/components/barber/CompleteProfileBanner';
 import { useAuthStore } from '@/stores/authStore';
+import { bookingsService } from '@/services/bookings';
+import { getApiErrorMessage } from '@/services/api';
 import type { BarberProfile } from '@/types/user';
+import type { Booking as ApiBooking } from '@/types/booking';
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
-
-const MOCK_BOOKINGS: Booking[] = [
-  {
-    id: '1',
-    clientName: 'Kwame Mensah',
-    clientAvatar: null,
-    serviceName: 'Executive Fade & Beard Trim',
-    status: 'confirmed',
-    startTime: new Date(new Date().setHours(14, 0, 0, 0)).toISOString(),
-    endTime:   new Date(new Date().setHours(14, 45, 0, 0)).toISOString(),
-    locationAddress: 'East Legon, Accra',
-  },
-  {
-    id: '2',
-    clientName: 'Kwabena Osei',
-    clientAvatar: null,
-    serviceName: 'Full Head Shave',
-    status: 'pending',
-    startTime: new Date(new Date().setHours(16, 0, 0, 0)).toISOString(),
-    endTime:   new Date(new Date().setHours(16, 30, 0, 0)).toISOString(),
-    locationAddress: 'Kumasi, Ashanti',
-  },
-  {
-    id: '3',
-    clientName: 'Akosua Boateng',
-    clientAvatar: null,
-    serviceName: 'Haircut',
-    status: 'completed',
-    startTime: new Date(Date.now() - 86_400_000).toISOString(),
-    endTime:   new Date(Date.now() - 86_400_000 + 1_800_000).toISOString(),
-    locationAddress: 'Osu, Accra',
-  },
-  {
-    id: '4',
-    clientName: 'Fiifi Andoh',
-    clientAvatar: null,
-    serviceName: 'Beard Shaping',
-    status: 'cancelled',
-    startTime: new Date(Date.now() - 172_800_000).toISOString(),
-    endTime:   new Date(Date.now() - 172_800_000 + 1_800_000).toISOString(),
-    locationAddress: 'Accra Mall, Accra',
-  },
-];
+/**
+ * The card only needs what it draws; the API row carries far more. Keeping the
+ * mapping here means the card stays a presentation component.
+ */
+function toCardBooking(b: ApiBooking): Booking {
+  return {
+    id: b.id,
+    clientName: b.clientName,
+    clientAvatar: b.clientAvatarUrl,
+    serviceName: b.serviceName,
+    status: b.status,
+    startTime: b.scheduledAt,
+    endTime: b.endsAt,
+    // In-shop jobs happen at the shop, so only mobile jobs carry an address.
+    locationAddress: b.clientLocation?.address ?? '',
+  };
+}
 
 // ─── Tab config ───────────────────────────────────────────────────────────────
 
@@ -84,15 +62,24 @@ const TABS = ['Upcoming', 'Completed', 'Cancelled'] as const;
 type TabName = (typeof TABS)[number];
 
 function filterBookings(bookings: Booking[], tab: TabName): Booking[] {
-  if (tab === 'Upcoming')  return bookings.filter((b) => b.status === 'confirmed' || b.status === 'pending');
+  if (tab === 'Upcoming') {
+    return bookings.filter((b) =>
+      b.status === 'confirmed' || b.status === 'pending' || b.status === 'in_progress',
+    );
+  }
   if (tab === 'Completed') return bookings.filter((b) => b.status === 'completed');
-  return bookings.filter((b) => b.status === 'cancelled');
+  return bookings.filter((b) => b.status === 'cancelled' || b.status === 'declined');
 }
 
 // ─── Modal config ─────────────────────────────────────────────────────────────
 
+/**
+ * Past appointments can't be deleted — they're the record behind the money
+ * ledger and the admin panel's audit trail. Cancelling is the only way to
+ * close one out, and that keeps the row.
+ */
 interface ModalConfig {
-  type: 'cancel' | 'cancel_batch' | 'delete' | 'delete_batch';
+  type: 'cancel' | 'cancel_batch' | 'decline';
   ids: string[];
 }
 
@@ -112,17 +99,11 @@ function getModalContent(config: ModalConfig) {
         message: `Are you sure you want to cancel these ${n} appointments? All affected clients will be notified.`,
         confirmLabel: `Cancel ${n} Appointment${n > 1 ? 's' : ''}`,
       };
-    case 'delete':
+    case 'decline':
       return {
-        title: 'Delete Record',
-        message: 'This will permanently remove this booking from your records.',
-        confirmLabel: 'Delete',
-      };
-    case 'delete_batch':
-      return {
-        title: `Delete ${n} Record${n > 1 ? 's' : ''}`,
-        message: `This will permanently remove these ${n} bookings from your records.`,
-        confirmLabel: `Delete ${n} Record${n > 1 ? 's' : ''}`,
+        title: 'Decline Request',
+        message: 'The client will be told you turned this request down, and the slot will be freed.',
+        confirmLabel: 'Decline Request',
       };
   }
 }
@@ -224,9 +205,9 @@ interface SwipeCardItemProps {
   onLongPress: (id: string) => void;
   onToggleSelect: (id: string) => void;
   onCancelPress: (id: string) => void;
-  onDeletePress: (id: string) => void;
   /** Present only for freelance barbers — enables the Accept/Decline request flow. */
   onAcceptPress?: (id: string) => void;
+  onDeclinePress?: (id: string) => void;
 }
 
 function SwipeCardItem({
@@ -237,16 +218,15 @@ function SwipeCardItem({
   onLongPress,
   onToggleSelect,
   onCancelPress,
-  onDeletePress,
   onAcceptPress,
+  onDeclinePress,
 }: SwipeCardItemProps) {
   const swipeRef = useRef<Swipeable>(null);
   const isUpcoming = tab === 'Upcoming';
 
   function handleActionPress() {
     swipeRef.current?.close();
-    if (isUpcoming) onCancelPress(item.id);
-    else             onDeletePress(item.id);
+    onCancelPress(item.id);
   }
 
   const card = (
@@ -257,12 +237,17 @@ function SwipeCardItem({
       onLongPress={onLongPress}
       onPress={onToggleSelect}
       onAccept={onAcceptPress}
-      onDecline={onAcceptPress ? onCancelPress : undefined}
+      onDecline={onAcceptPress ? onDeclinePress : undefined}
     />
   );
 
   // Disable swipe while in batch-selection mode
   if (isSelectionMode) {
+    return <View className="mx-4 mb-3">{card}</View>;
+  }
+
+  // A closed booking has nothing left to act on — the record stays.
+  if (!isUpcoming) {
     return <View className="mx-4 mb-3">{card}</View>;
   }
 
@@ -278,20 +263,15 @@ function SwipeCardItem({
             activeOpacity={0.85}
             style={{
               width: 76,
-              backgroundColor: isUpcoming ? '#E53E3E' : '#4A5568',
+              backgroundColor: '#E53E3E',
               borderRadius: 16,
               alignItems: 'center',
               justifyContent: 'center',
               gap: 4,
             }}
           >
-            {isUpcoming
-              ? <XCircle size={22} color="white" />
-              : <Trash2  size={22} color="white" />
-            }
-            <Text style={{ color: 'white', fontSize: 11, fontWeight: '700' }}>
-              {isUpcoming ? 'Cancel' : 'Delete'}
-            </Text>
+            <XCircle size={22} color="white" />
+            <Text style={{ color: 'white', fontSize: 11, fontWeight: '700' }}>Cancel</Text>
           </TouchableOpacity>
         )}
       >
@@ -306,15 +286,14 @@ function SwipeCardItem({
 interface SelectionBarProps {
   count: number;
   totalCount: number;
-  tab: TabName;
   onToggleAll: () => void;
   onExit: () => void;
   onAction: () => void;
 }
 
-function SelectionBar({ count, totalCount, tab, onToggleAll, onExit, onAction }: SelectionBarProps) {
+/** Only ever shown on Upcoming, where cancelling is the one batch action. */
+function SelectionBar({ count, totalCount, onToggleAll, onExit, onAction }: SelectionBarProps) {
   const allSelected = totalCount > 0 && count === totalCount;
-  const isUpcoming  = tab === 'Upcoming';
 
   return (
     <View
@@ -358,17 +337,12 @@ function SelectionBar({ count, totalCount, tab, onToggleAll, onExit, onAction }:
         <Pressable
           onPress={onAction}
           disabled={count === 0}
-          className={`flex-row items-center gap-2 px-4 py-2.5 rounded-full active:opacity-80 ${
-            isUpcoming ? 'bg-danger' : 'bg-neutral-700'
-          } ${count === 0 ? 'opacity-40' : ''}`}
+          className={`flex-row items-center gap-2 px-4 py-2.5 rounded-full active:opacity-80 bg-danger ${
+            count === 0 ? 'opacity-40' : ''
+          }`}
         >
-          {isUpcoming
-            ? <XCircle size={15} color="white" />
-            : <Trash2  size={15} color="white" />
-          }
-          <Text className="text-white text-sm font-bold">
-            {isUpcoming ? 'Cancel' : 'Delete'}
-          </Text>
+          <XCircle size={15} color="white" />
+          <Text className="text-white text-sm font-bold">Cancel</Text>
         </Pressable>
       </View>
     </View>
@@ -389,29 +363,36 @@ export default function BarberBookingsScreen() {
   const isFreelance = barber?.barberType === 'mobile';
 
   // ── State ────────────────────────────────────────────────────────────────────
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab]         = useState<TabName>('Upcoming');
-  const [bookings, setBookings]           = useState<Booking[]>(MOCK_BOOKINGS);
-  const [loading, setLoading]             = useState(true);
   const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set());
   const [isSelectionMode, setIsSelection] = useState(false);
   const [modalConfig, setModalConfig]     = useState<ModalConfig | null>(null);
   const [acceptToast, setAcceptToast]     = useState('');
 
-  // TODO: replace with the real bookings fetch once the bookings endpoint exists.
-  useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 450);
-    return () => clearTimeout(t);
-  }, []);
+  // Everything a client books at this shop lands here.
+  const { data, isLoading: loading, isRefetching, refetch } = useQuery({
+    queryKey: ['bookings', 'barber'],
+    queryFn: () => bookingsService.getBarberBookings({ page: 1 }),
+  });
 
-  // Freelance request flow: accepting confirms the slot and notifies the client
-  // to proceed with payment.
-  function handleAccept(id: string) {
-    setBookings((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, status: 'confirmed' as BookingStatus } : b)),
-    );
-    // TODO: PATCH /api/bookings/:id/accept → push notification + payment request to client
-    setAcceptToast('Request accepted — client notified to make payment');
-    setTimeout(() => setAcceptToast(''), 2800);
+  const apiBookings = useMemo(() => data?.data.data ?? [], [data]);
+  const bookings = useMemo(() => apiBookings.map(toCardBooking), [apiBookings]);
+
+  function refresh() {
+    queryClient.invalidateQueries({ queryKey: ['bookings'] });
+  }
+
+  // Freelance request flow: accepting lets the client go ahead and pay.
+  async function handleAccept(id: string) {
+    try {
+      await bookingsService.confirm(id);
+      refresh();
+      setAcceptToast('Request accepted — client notified to make payment');
+      setTimeout(() => setAcceptToast(''), 2800);
+    } catch (err) {
+      Alert.alert('Not accepted', getApiErrorMessage(err));
+    }
   }
 
   // ── Animated values ──────────────────────────────────────────────────────────
@@ -433,12 +414,15 @@ export default function BarberBookingsScreen() {
   });
 
   // ── Derived ──────────────────────────────────────────────────────────────────
-  const upcomingCount     = bookings.filter((b) => b.status === 'confirmed' || b.status === 'pending').length;
+  const upcomingCount      = filterBookings(bookings, 'Upcoming').length;
   const activePageBookings = filterBookings(bookings, activeTab);
 
   // ── Selection helpers ────────────────────────────────────────────────────────
 
   function enterSelectionMode(id: string) {
+    // Closed bookings have no batch action, so selection only makes sense
+    // where cancelling does.
+    if (activeTab !== 'Upcoming') return;
     setIsSelection(true);
     setSelectedIds(new Set([id]));
   }
@@ -501,36 +485,37 @@ export default function BarberBookingsScreen() {
     setModalConfig({ type: 'cancel', ids: [id] });
   }
 
-  function handleSwipeDelete(id: string) {
-    setModalConfig({ type: 'delete', ids: [id] });
+  function handleDecline(id: string) {
+    setModalConfig({ type: 'decline', ids: [id] });
   }
 
   // ── Batch actions ────────────────────────────────────────────────────────────
 
   function handleBatchAction() {
-    const ids = Array.from(selectedIds);
-    setModalConfig({
-      type: activeTab === 'Upcoming' ? 'cancel_batch' : 'delete_batch',
-      ids,
-    });
+    setModalConfig({ type: 'cancel_batch', ids: Array.from(selectedIds) });
   }
 
   // ── Modal confirm ────────────────────────────────────────────────────────────
 
-  function executeAction() {
+  async function executeAction() {
     if (!modalConfig) return;
     const { type, ids } = modalConfig;
-
-    if (type === 'cancel' || type === 'cancel_batch') {
-      setBookings((prev) =>
-        prev.map((b) => ids.includes(b.id) ? { ...b, status: 'cancelled' as BookingStatus } : b),
-      );
-    } else {
-      setBookings((prev) => prev.filter((b) => !ids.includes(b.id)));
-    }
-
-    exitSelectionMode();
     setModalConfig(null);
+
+    try {
+      // Declining is only for a request the barber never took money for;
+      // cancelling closes a live booking and refunds anything already paid.
+      await Promise.all(
+        ids.map((id) =>
+          type === 'decline' ? bookingsService.decline(id) : bookingsService.cancel(id),
+        ),
+      );
+    } catch (err) {
+      Alert.alert('Something went wrong', getApiErrorMessage(err));
+    } finally {
+      refresh();
+      exitSelectionMode();
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -624,6 +609,9 @@ export default function BarberBookingsScreen() {
                 }}
                 showsVerticalScrollIndicator={false}
                 ListEmptyComponent={<EmptyState tab={tab} />}
+                refreshControl={
+                  <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor="#3c3cb9" />
+                }
                 renderItem={({ item }) => (
                   <SwipeCardItem
                     item={item}
@@ -633,8 +621,8 @@ export default function BarberBookingsScreen() {
                     onLongPress={enterSelectionMode}
                     onToggleSelect={toggleSelection}
                     onCancelPress={handleSwipeCancel}
-                    onDeletePress={handleSwipeDelete}
                     onAcceptPress={isFreelance ? handleAccept : undefined}
+                    onDeclinePress={handleDecline}
                   />
                 )}
               />
@@ -649,7 +637,6 @@ export default function BarberBookingsScreen() {
         <SelectionBar
           count={selectedIds.size}
           totalCount={activePageBookings.length}
-          tab={activeTab}
           onToggleAll={toggleSelectAll}
           onExit={exitSelectionMode}
           onAction={handleBatchAction}

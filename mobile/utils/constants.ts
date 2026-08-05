@@ -1,5 +1,15 @@
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:3000/api';
 
+// ── Brand / domain ──────────────────────────────────────────────────────────
+// Single source of truth for every public-facing URL and address, so switching
+// domains later (e.g. to a GitHub Student Pack .me domain) is a one-line change.
+export const APP_DOMAIN = 'trimova.website';
+export const SUPPORT_EMAIL = `support@${APP_DOMAIN}`;
+export const PRIVACY_URL = `https://${APP_DOMAIN}/privacy`;
+
+/** Public link to a barber's bookable profile. */
+export const barberProfileLink = (barberId: string) => `${APP_DOMAIN}/b/${barberId}`;
+
 export const GOOGLE_MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY ?? '';
 
 export const PAYSTACK_KEY = process.env.EXPO_PUBLIC_PAYSTACK_KEY ?? '';

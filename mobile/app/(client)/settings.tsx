@@ -10,6 +10,9 @@ import {
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/services/auth';
 import { getApiErrorMessage } from '@/services/api';
+import { SupportIdCard } from '@/components/ui/SupportIdCard';
+import { T } from '@/constants/clientTheme';
+import { APP_DOMAIN, PRIVACY_URL } from '@/utils/constants';
 
 function Row({ icon, label, subtitle, danger, onPress, isLast = false }: {
   icon: React.ReactNode;
@@ -88,8 +91,8 @@ export default function ClientSettingsScreen() {
           label="Privacy Policy"
           subtitle="How Trimova handles your data"
           onPress={() =>
-            Linking.openURL('https://trimova.app/privacy').catch(() =>
-              Alert.alert('Privacy Policy', 'Read our privacy policy at trimova.app/privacy'),
+            Linking.openURL(PRIVACY_URL).catch(() =>
+              Alert.alert('Privacy Policy', `Read our privacy policy at ${APP_DOMAIN}/privacy`),
             )
           }
         />
@@ -99,6 +102,18 @@ export default function ClientSettingsScreen() {
           subtitle="Light theme (dark mode coming to the client app soon)"
           onPress={() => Alert.alert('Appearance', 'Theme options for the client experience are coming soon.')}
         />
+        {/* Account identifier — sits just above the destructive actions */}
+        <View style={{ paddingHorizontal: 16, paddingTop: 18, paddingBottom: 6 }}>
+          <SupportIdCard
+            surface={T.card}
+            border={T.border}
+            text={T.text}
+            muted={T.textFaint}
+            accent={T.accent}
+            wash={T.input}
+          />
+        </View>
+
         <Row
           icon={<Trash2 size={17} color="#E53E3E" />}
           label="Delete Account"

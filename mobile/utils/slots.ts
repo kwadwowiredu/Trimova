@@ -81,35 +81,7 @@ export function groupSlots(slots: string[]): { label: string; slots: string[] }[
   return groups.filter((g) => g.slots.length > 0);
 }
 
-// ─── Mock booked blocks (until the bookings API exists) ──────────────────────
-// Keyed by `${professionalId}|${date}`.
-const MOCK_BUSY: Record<string, BusyBlock[]> = {};
-
-function seedKey(professionalId: string, date: string) {
-  return `${professionalId}|${date}`;
-}
-
-/** Deterministic pseudo-bookings so the grid looks realistically occupied. */
-export function getBusyBlocks(professionalId: string, date: string): BusyBlock[] {
-  const key = seedKey(professionalId, date);
-  if (!MOCK_BUSY[key]) {
-    // Simple deterministic hash → 0–3 fake appointments for that barber/day.
-    let hash = 0;
-    for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) | 0;
-    const h = Math.abs(hash);
-    const seeds: BusyBlock[] = [
-      { start: '10:00', end: '10:45' },
-      { start: '12:30', end: '13:00' },
-      { start: '15:00', end: '16:00' },
-      { start: '17:30', end: '18:15' },
-    ];
-    MOCK_BUSY[key] = seeds.filter((_, i) => (h >> i) % 2 === 0);
-  }
-  return MOCK_BUSY[key];
-}
-
-/** Called after a successful booking so the slot disappears for everyone else. */
-export function reserveBlock(professionalId: string, date: string, block: BusyBlock) {
-  const key = seedKey(professionalId, date);
-  MOCK_BUSY[key] = [...(MOCK_BUSY[key] ?? []), block];
-}
+// Busy blocks now come from the API — `bookingsService.getAvailability` returns
+// the barber's real appointments and breaks for the chosen day. The database
+// has the final say: an EXCLUDE constraint on `appointments` rejects any
+// overlap, so a slot that two clients tap at once can only be taken by one.

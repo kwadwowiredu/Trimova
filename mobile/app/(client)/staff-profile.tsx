@@ -11,7 +11,6 @@ import {
   ChevronLeft, Star, CalendarCheck, ImageOff, Phone, Mail, Heart, Scissors, MoreHorizontal,
 } from 'lucide-react-native';
 import { T, HAIRLINE } from '@/constants/clientTheme';
-import { StarIcon } from '@/components/ui/Icons';
 import { barbersService } from '@/services/barbers';
 import { MOCK_SHOP_STAFF, MOCK_SHOP_REVIEWS, type StaffService } from '@/utils/mockShopData';
 import { ReviewRow } from '@/components/barber/ReviewRow';
@@ -219,7 +218,7 @@ export default function ClientStaffProfileScreen() {
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={{ fontSize: 18, fontWeight: '600', color: T.text }}>{profile.name}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-                <StarIcon size={14} />
+                <Star size={14} color={T.star} fill={T.star} />
                 <Text style={{ fontSize: 14, fontWeight: '600', color: T.text }}>
                   {profile.rating.toFixed(1)}
                   <Text style={{ fontWeight: '600', color: T.textFaint }}> ({profile.reviewCount})</Text>

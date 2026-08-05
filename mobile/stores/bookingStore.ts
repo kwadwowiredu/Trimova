@@ -34,7 +34,16 @@ interface BookingState {
    */
   clientAddress: string | null;
   clientCoords: { lat: number; lng: number } | null;
-  /** Epoch ms when the held slot expires (set when entering the summary). */
+  /**
+   * The appointment row once it exists on the server. Created when the client
+   * commits on the summary step — that's what actually reserves the slot, and
+   * what the payment step charges against.
+   */
+  bookingId: string | null;
+  /**
+   * Epoch ms when the held slot expires. Mirrors the server's hold_expires_at
+   * so the countdown the client sees matches the one the API enforces.
+   */
   holdExpiresAt: number | null;
 
   /**
@@ -46,7 +55,8 @@ interface BookingState {
   setProfessional: (p: BookingProfessional) => void;
   setDateTime: (date: string, time: string) => void;
   setClientLocation: (address: string, coords: { lat: number; lng: number } | null) => void;
-  beginHold: () => void;
+  /** Record the created appointment and the hold window the server granted. */
+  setBooking: (id: string, holdExpiresAt: string | null) => void;
   clearHold: () => void;
   reset: () => void;
 }
@@ -60,6 +70,7 @@ const INITIAL = {
   time: null,
   clientAddress: null,
   clientCoords: null,
+  bookingId: null,
   holdExpiresAt: null,
 };
 
@@ -72,7 +83,12 @@ export const useBookingStore = create<BookingState>((set) => ({
   setProfessional: (professional) => set({ professional }),
   setDateTime: (date, time) => set({ date, time }),
   setClientLocation: (clientAddress, clientCoords) => set({ clientAddress, clientCoords }),
-  beginHold: () => set({ holdExpiresAt: Date.now() + PAYMENT_WINDOW_MS }),
+  setBooking: (bookingId, holdExpiresAt) =>
+    set({
+      bookingId,
+      // A request awaiting a mobile barber's approval isn't on a clock yet.
+      holdExpiresAt: holdExpiresAt ? new Date(holdExpiresAt).getTime() : null,
+    }),
   clearHold: () => set({ holdExpiresAt: null }),
   reset: () => set({ ...INITIAL }),
 }));

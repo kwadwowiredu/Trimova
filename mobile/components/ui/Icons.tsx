@@ -1,31 +1,53 @@
 import { View, Image, type ImageStyle, type StyleProp } from 'react-native';
+import { T } from '@/constants/clientTheme';
 
-// Brand artwork used in place of the generic lucide glyphs on the client side.
+// Brand artwork. Used in exactly two places so the rest of the app keeps the
+// consistent lucide icon set:
+//   • StarIcon      — the "Recommended" heading on the client home
+//   • StarBadge     — the My Reviews empty state
+//   • CalendarBadge — the Bookings empty state
+//
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const STAR_IMG = require('../../assets/star.jpg');
+const STAR_IMG = require('../../assets/star.png');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const CALENDAR_IMG = require('../../assets/calendar_image.jpg');
+const CALENDAR_IMG = require('../../assets/calendar_image.png');
 
-/** Brand star. `size` keeps the same call shape as the lucide <Star size=… />. */
+/** Brand star mark. */
 export function StarIcon({ size = 16, style }: { size?: number; style?: StyleProp<ImageStyle> }) {
   return <Image source={STAR_IMG} style={[{ width: size, height: size }, style]} resizeMode="contain" />;
 }
 
-/** Brand calendar mark used on the booking date screen. */
+/** Brand calendar mark. */
 export function CalendarIcon({ size = 22, style }: { size?: number; style?: StyleProp<ImageStyle> }) {
   return <Image source={CALENDAR_IMG} style={[{ width: size, height: size }, style]} resizeMode="contain" />;
 }
 
 /**
- * Five-star rating row. The artwork can't be half-filled, so stars past the
- * score are dimmed instead.
+ * Empty-state artwork. The image sits on the screen's own canvas colour so a
+ * non-transparent source blends in rather than showing a white square.
  */
-export function StarRating({ value, size = 14 }: { value: number; size?: number }) {
+function EmptyBadge({ children, size }: { children: React.ReactNode; size: number }) {
   return (
-    <View style={{ flexDirection: 'row', gap: 2 }}>
-      {[1, 2, 3, 4, 5].map((i) => (
-        <StarIcon key={i} size={size} style={{ opacity: value >= i - 0.25 ? 1 : 0.22 }} />
-      ))}
+    <View
+      style={{
+        width: size * 2.1,
+        height: size * 2.1,
+        borderRadius: size * 1.05,
+        backgroundColor: T.canvas,
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+      }}
+    >
+      {children}
     </View>
   );
+}
+
+export function StarBadge({ size = 52 }: { size?: number }) {
+  return <EmptyBadge size={size}><StarIcon size={size} /></EmptyBadge>;
+}
+
+export function CalendarBadge({ size = 52 }: { size?: number }) {
+  return <EmptyBadge size={size}><CalendarIcon size={size} /></EmptyBadge>;
 }

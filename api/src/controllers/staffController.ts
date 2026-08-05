@@ -118,8 +118,18 @@ export const staffController = {
       .single();
 
     if (error || !invite) {
-      console.error('[createInvite]', error);
-      sendError(res, 'Failed to create the invitation.', 500);
+      // Full technical detail goes to the server log for us; the barber sees
+      // plain language. (The usual cause is migration 010 not having been run,
+      // which shows up here as a missing-relation error.)
+      const detail = (error as { message?: string; code?: string } | null)?.message ?? '';
+      const missingTable = /relation .*staff_invites.* does not exist|schema cache/i.test(detail);
+      console.error(
+        missingTable
+          ? '[createInvite] staff_invites table missing — run database/010_staff_invites.sql'
+          : '[createInvite] insert failed:',
+        error,
+      );
+      sendError(res, "We couldn't send that invitation right now. Please try again in a moment.", 500);
       return;
     }
 
@@ -134,7 +144,6 @@ export const staffController = {
       staffName: fullName.trim(),
       shopName: (profile?.business_name as string) || 'the team',
       ownerName: (owner.full_name as string) || 'The owner',
-      code,
       joinUrl: `${process.env.APP_URL ?? 'trimova://'}join-staff?token=${token}`,
       expiresInDays: INVITE_TTL_DAYS,
     });
@@ -144,9 +153,51 @@ export const staffController = {
       res,
       { invite: formatInvite(invite), emailSent: delivery.sent, emailSimulated: delivery.simulated },
       delivery.sent
-        ? 'Invitation sent.'
-        : 'Invitation created — share the code with them directly.',
+        ? 'Invitation email sent.'
+        : 'Invitation created, but the email could not be sent. Check the server logs.',
       201,
+    );
+  },
+
+  /** POST /api/staff/invites/:id/resend — send the same invite email again. */
+  async resendInvite(req: Request, res: Response) {
+    const supabase = getSupabase();
+    const { data: invite } = await supabase
+      .from('staff_invites')
+      .select('*')
+      .eq('id', req.params.id)
+      .eq('owner_id', req.user!.sub)
+      .maybeSingle();
+
+    if (!invite)            { sendError(res, 'Invitation not found.', 404); return; }
+    if (invite.accepted_at) { sendError(res, 'That invitation has already been used.', 410); return; }
+    if (invite.revoked_at)  { sendError(res, 'That invitation has been revoked.', 410); return; }
+
+    // Push the expiry out so a resend is actually useful.
+    const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 86_400_000);
+    await supabase
+      .from('staff_invites')
+      .update({ expires_at: expiresAt.toISOString() })
+      .eq('id', invite.id);
+
+    const [{ data: owner }, { data: profile }] = await Promise.all([
+      supabase.from('users').select('full_name').eq('id', req.user!.sub).single(),
+      supabase.from('barber_profiles').select('business_name').eq('user_id', req.user!.sub).maybeSingle(),
+    ]);
+
+    const mail = staffInviteEmail({
+      staffName: invite.full_name as string,
+      shopName: (profile?.business_name as string) || 'the team',
+      ownerName: (owner?.full_name as string) || 'The owner',
+      joinUrl: `${process.env.APP_URL ?? 'trimova://'}join-staff?token=${invite.token}`,
+      expiresInDays: INVITE_TTL_DAYS,
+    });
+    const delivery = await sendEmail({ to: invite.email as string, ...mail });
+
+    sendSuccess(
+      res,
+      { emailSent: delivery.sent, emailSimulated: delivery.simulated },
+      delivery.sent ? 'Invitation email resent.' : 'Email is not configured — check the server logs.',
     );
   },
 

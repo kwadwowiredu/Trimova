@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ChevronLeft, Eye, EyeOff, Check, Store, Ticket } from 'lucide-react-native';
+import { ChevronLeft, Eye, EyeOff, Check, Store, MailX } from 'lucide-react-native';
 import { staffService, type InviteLookup } from '@/services/staff';
 import { useAuthStore } from '@/stores/authStore';
 import { getApiErrorMessage } from '@/services/api';
@@ -18,50 +18,42 @@ const WELL = '#f1f3ff';
 const ACCENT = '#023047';
 
 /**
- * Staff join screen — redeem an invite and create the account.
+ * Staff join screen — reached ONLY by tapping the invitation link we emailed
+ * (`trimova://join-staff?token=…`).
  *
- * Two entry points, one token: a deep link (`?token=`) or a code typed in by
- * hand. Either way the invite is bound to an email address, so the account can
- * only be created with the address the shop invited.
+ * The invite is bound to an email address, so the address is fixed and shown
+ * read-only; all the staff member does is choose a password.
  */
 export default function JoinStaffScreen() {
   const insets = useSafeAreaInsets();
   const { token } = useLocalSearchParams<{ token?: string }>();
   const { setAuth } = useAuthStore();
 
-  const [code, setCode] = useState('');
   const [invite, setInvite] = useState<InviteLookup | null>(null);
   const [lookupError, setLookupError] = useState('');
-  const [checking, setChecking] = useState(false);
+  const [checking, setChecking] = useState(true);
 
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  /** Resolve an invite from a deep-link token or a typed code. */
-  async function lookup(args: { code?: string; token?: string }) {
-    setChecking(true);
-    setLookupError('');
-    try {
-      const res = await staffService.lookupInvite(args);
-      setInvite(res.data.data);
-    } catch (e) {
-      setInvite(null);
-      setLookupError(getApiErrorMessage(e) || "We couldn't find that invitation.");
-    } finally {
-      setChecking(false);
-    }
-  }
-
-  // Arriving from the emailed link — resolve immediately.
   useEffect(() => {
-    if (token) lookup({ token });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!token) {
+      setChecking(false);
+      setLookupError('This link is missing its invitation details.');
+      return;
+    }
+    let active = true;
+    staffService.lookupInvite({ token })
+      .then((res) => { if (active) setInvite(res.data.data); })
+      .catch((e) => { if (active) setLookupError(getApiErrorMessage(e) || "We couldn't find that invitation."); })
+      .finally(() => { if (active) setChecking(false); });
+    return () => { active = false; };
   }, [token]);
 
   async function handleJoin() {
-    if (!invite) return;
+    if (!invite || !token) return;
     if (!meetsAllPasswordRules(password)) {
       setSubmitError('Password must be 8+ characters with an uppercase letter and a number.');
       return;
@@ -70,8 +62,8 @@ export default function JoinStaffScreen() {
     setSubmitError('');
     try {
       const res = await staffService.acceptInvite({
-        ...(token ? { token } : { code: code.trim().toUpperCase() }),
-        email: invite.email,      // bound by the invite — not user-editable
+        token,
+        email: invite.email,   // bound by the invite — not user-editable
         password,
       });
       const { token: authToken, user } = res.data.data;
@@ -108,51 +100,33 @@ export default function JoinStaffScreen() {
 
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
 
-          {/* ── Step 1: identify the invite ───────────────────── */}
-          {!invite ? (
-            <View style={{ backgroundColor: '#ffffff', borderRadius: 18, borderWidth: 1, borderColor: BORDER, padding: 20 }}>
-              <View style={{ width: 48, height: 48, borderRadius: 16, backgroundColor: WELL, alignItems: 'center', justifyContent: 'center' }}>
-                <Ticket size={22} color={ACCENT} />
+          {checking ? (
+            <View style={{ alignItems: 'center', paddingVertical: 60, gap: 12 }}>
+              <ActivityIndicator color={ACCENT} />
+              <Text style={{ fontSize: 14, color: MUTED }}>Checking your invitation…</Text>
+            </View>
+          ) : !invite ? (
+            /* Invalid / expired / revoked link */
+            <View style={{ backgroundColor: '#ffffff', borderRadius: 18, borderWidth: 1, borderColor: BORDER, padding: 22, alignItems: 'center' }}>
+              <View style={{ width: 54, height: 54, borderRadius: 27, backgroundColor: '#ffe9e9', alignItems: 'center', justifyContent: 'center' }}>
+                <MailX size={24} color="#d00000" />
               </View>
-              <Text style={{ fontSize: 18, fontWeight: '800', color: NAVY, marginTop: 14 }}>
-                Enter your invite code
+              <Text style={{ fontSize: 17, fontWeight: '800', color: NAVY, marginTop: 14, textAlign: 'center' }}>
+                This invitation isn't valid
               </Text>
-              <Text style={{ fontSize: 14, color: MUTED, marginTop: 6, lineHeight: 20 }}>
-                Your shop owner will have sent this to you by email, or given it to you directly.
+              <Text style={{ fontSize: 14, color: MUTED, marginTop: 8, textAlign: 'center', lineHeight: 20 }}>
+                {lookupError || 'Ask the shop owner to send you a new invitation email.'}
               </Text>
-
-              <TextInput
-                value={code}
-                onChangeText={(t) => { setCode(t.toUpperCase()); setLookupError(''); }}
-                placeholder="TRV-XXXX-XX"
-                placeholderTextColor={MUTED}
-                autoCapitalize="characters"
-                autoCorrect={false}
-                style={{
-                  ...inputStyle, marginTop: 18, textAlign: 'center',
-                  fontSize: 20, fontWeight: '800', letterSpacing: 3,
-                }}
-              />
-              {lookupError ? (
-                <Text style={{ color: '#d00000', fontSize: 13, marginTop: 8 }}>{lookupError}</Text>
-              ) : null}
-
               <Pressable
-                onPress={() => lookup({ code: code.trim().toUpperCase() })}
-                disabled={code.trim().length < 6 || checking}
-                style={{
-                  backgroundColor: code.trim().length >= 6 && !checking ? ACCENT : WELL,
-                  borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginTop: 16,
-                }}
+                onPress={() => router.replace('/(auth)/login')}
+                style={{ backgroundColor: ACCENT, borderRadius: 14, paddingHorizontal: 28, paddingVertical: 14, marginTop: 20 }}
               >
-                {checking
-                  ? <ActivityIndicator color={ACCENT} />
-                  : <Text style={{ color: code.trim().length >= 6 ? '#fff' : MUTED, fontSize: 15, fontWeight: '700' }}>Continue</Text>}
+                <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>Back to sign in</Text>
               </Pressable>
             </View>
           ) : (
-            /* ── Step 2: confirm + set a password ─────────────── */
             <>
+              {/* Who / where */}
               <View style={{ backgroundColor: '#ffffff', borderRadius: 18, borderWidth: 1, borderColor: BORDER, padding: 20 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                   <View style={{ width: 46, height: 46, borderRadius: 15, backgroundColor: WELL, alignItems: 'center', justifyContent: 'center' }}>
@@ -174,7 +148,7 @@ export default function JoinStaffScreen() {
                 <Text style={{ fontSize: 11, fontWeight: '800', color: MUTED, letterSpacing: 0.8, textTransform: 'uppercase', marginTop: 14 }}>Email</Text>
                 <Text style={{ fontSize: 15, fontWeight: '600', color: NAVY, marginTop: 4 }}>{invite.email}</Text>
                 <Text style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>
-                  This invitation only works with this address.
+                  Your account will be created with this address.
                 </Text>
               </View>
 
@@ -222,10 +196,6 @@ export default function JoinStaffScreen() {
                     : <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>Join {invite.shopName}</Text>}
                 </Pressable>
               </View>
-
-              <Pressable onPress={() => { setInvite(null); setCode(''); }} style={{ paddingVertical: 14, alignItems: 'center', marginTop: 4 }}>
-                <Text style={{ color: MUTED, fontSize: 14, fontWeight: '600' }}>Use a different code</Text>
-              </Pressable>
             </>
           )}
         </ScrollView>

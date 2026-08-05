@@ -2,7 +2,16 @@ import { View, Text, Image } from 'react-native';
 import { Star } from 'lucide-react-native';
 import { avatarColorFor, fmtReviewDate, type ShopReview } from '@/utils/mockShopData';
 import { T, HAIRLINE } from '@/constants/clientTheme';
-import { StarIcon, StarRating } from '@/components/ui/Icons';
+
+function Stars({ value, size = 12 }: { value: number; size?: number }) {
+  return (
+    <View style={{ flexDirection: 'row', gap: 1 }}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <Star key={i} size={size} color={T.star} fill={value >= i - 0.25 ? T.star : 'transparent'} />
+      ))}
+    </View>
+  );
+}
 
 /**
  * One client review: profile photo when they have one, otherwise a colored
@@ -32,7 +41,7 @@ export function ReviewRow({ review, showStaff = true, isFirst = false }: {
           <Text style={{ fontSize: 12, color: T.textFaint }}>{fmtReviewDate(review.date)}</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
-          <StarRating value={review.rating} />
+          <Stars value={review.rating} />
           {showStaff && <Text style={{ fontSize: 11.5, color: T.textFaint }}>with {review.staffName}</Text>}
         </View>
         <Text style={{ fontSize: 13.5, color: T.textMuted, lineHeight: 19, marginTop: 6 }}>{review.comment}</Text>

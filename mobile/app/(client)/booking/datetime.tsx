@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Image, Animated } from 'react-native';
+import { View, Text, Pressable, ScrollView, Image, Animated, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
 // Imported from its own subpath (not the package barrel) so Metro never has to
 // pull in Timeline / TimelineList / agenda / recyclerlistview — we only need
@@ -8,21 +8,12 @@ import Calendar from 'react-native-calendars/src/calendar';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarX, Clock, AlertTriangle, ChevronDown, UserRound } from 'lucide-react-native';
 import { barbersService } from '@/services/barbers';
+import { bookingsService } from '@/services/bookings';
 import { useBookingStore, fmt12, addMinutes, toDateTime } from '@/stores/bookingStore';
-import { generateSlots, groupSlots, getBusyBlocks } from '@/utils/slots';
+import { generateSlots, groupSlots } from '@/utils/slots';
 import { BookingHeader, ServiceCartBar } from '@/components/booking/BookingHeader';
 import { tapSelect, tapLight } from '@/utils/haptics';
 import { T, HAIRLINE } from '@/constants/clientTheme';
-import { CalendarIcon } from '@/components/ui/Icons';
-
-interface OpeningDay {
-  day: string;
-  isOpen: boolean;
-  openTime: string;
-  closeTime: string;
-}
-
-const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 /** Local "YYYY-MM-DD" (never UTC — that shifts the day in Ghana's timezone). */
 function ymd(d: Date): string {
@@ -41,19 +32,55 @@ export default function BookingDateTimeScreen() {
     enabled: !!barberId,
   });
   const shop = data?.data.data as unknown as {
-    workingHours?: OpeningDay[] | null;
     barberType?: string;
     bookingRules?: { leadMinutes: number; futureDays: number };
   } | undefined;
   // Mobile barbers need to know where to travel, so they get an address step.
   const isMobile = shop?.barberType === 'mobile';
 
-  const workingHours = shop?.workingHours ?? null;
-  const leadMinutes = shop?.bookingRules?.leadMinutes ?? 30;
   const futureDays = shop?.bookingRules?.futureDays ?? 90;
 
   const today = new Date();
   const maxDate = new Date(today.getTime() + futureDays * 86_400_000);
+
+  // Only a real staff member narrows the calendar; 'any'/'owner' means the
+  // shop's own calendar, which is what the barberId already selects.
+  const staffId =
+    professional && professional.id !== 'any' && professional.id !== 'owner'
+      ? professional.id
+      : undefined;
+
+  /**
+   * Which days can still fit this service — one request for the whole booking
+   * window, so the calendar can grey out closed and fully-booked days.
+   */
+  const { data: monthData, isLoading: loadingMonth } = useQuery({
+    queryKey: ['availability-month', barberId, staffId, service?.durationMinutes, futureDays],
+    queryFn: () =>
+      bookingsService.getMonthAvailability({
+        barberId: barberId!,
+        staffBarberId: staffId,
+        from: ymd(today),
+        to: ymd(maxDate),
+        durationMinutes: service!.durationMinutes,
+      }),
+    enabled: !!barberId && !!service,
+    staleTime: 60_000,
+  });
+  const monthDates = monthData?.data.data.dates ?? {};
+
+  /** The chosen day's real opening hours, breaks and taken slots. */
+  const { data: dayData, isFetching: loadingDay } = useQuery({
+    queryKey: ['availability-day', barberId, staffId, selectedDate],
+    queryFn: () =>
+      bookingsService.getAvailability({
+        barberId: barberId!,
+        staffBarberId: staffId,
+        date: selectedDate!,
+      }),
+    enabled: !!barberId && !!selectedDate,
+  });
+  const day = dayData?.data.data;
 
   // ── Toast for "that time has passed" ─────────────────────────
   const toastAnim = useRef(new Animated.Value(0)).current;
@@ -68,34 +95,21 @@ export default function BookingDateTimeScreen() {
     ]).start();
   }
 
-  /** Free start times for a given day (empty when closed / fully booked). */
-  function slotsFor(dateStr: string): string[] {
-    if (!service || !professional || !workingHours) return [];
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const wh = workingHours.find((w) => w.day === DAY_NAMES[new Date(y, m - 1, d).getDay()]);
-    if (!wh || !wh.isOpen) return [];
+  // The API sends the day's raw calendar; turning it into start times is the
+  // same arithmetic on both sides (see utils/slots.ts).
+  const slots = useMemo(() => {
+    if (!service || !day?.isOpen || !day.openTime || !day.closeTime) return [];
     return generateSlots({
-      openTime: wh.openTime,
-      closeTime: wh.closeTime,
-      busy: getBusyBlocks(professional.id, dateStr),
+      openTime: day.openTime,
+      closeTime: day.closeTime,
+      busy: day.busy,
       durationMinutes: service.durationMinutes,
-      isToday: dateStr === ymd(today),
-      leadMinutes,
+      isToday: selectedDate === ymd(today),
+      leadMinutes: day.leadMinutes,
     });
-  }
-
-  const dayHours = useMemo(() => {
-    if (!selectedDate || !workingHours) return null;
-    const [y, m, d] = selectedDate.split('-').map(Number);
-    return workingHours.find((w) => w.day === DAY_NAMES[new Date(y, m - 1, d).getDay()]) ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDate, workingHours]);
+  }, [day, service, selectedDate]);
 
-  const slots = useMemo(
-    () => (selectedDate ? slotsFor(selectedDate) : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedDate, service, professional, workingHours, leadMinutes],
-  );
   const grouped = useMemo(() => groupSlots(slots), [slots]);
 
   // Green = bookable, greyed = closed or fully booked.
@@ -104,7 +118,7 @@ export default function BookingDateTimeScreen() {
     for (let i = 0; i <= futureDays; i++) {
       const d = new Date(today.getTime() + i * 86_400_000);
       const key = ymd(d);
-      const bookable = slotsFor(key).length > 0;
+      const bookable = monthDates[key]?.available ?? false;
       marks[key] = bookable
         ? {
             customStyles: {
@@ -129,7 +143,7 @@ export default function BookingDateTimeScreen() {
     }
     return marks;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workingHours, selectedDate, futureDays, service, professional]);
+  }, [monthDates, selectedDate, futureDays]);
 
   // If the clock passes the selected start time, drop it and tell them.
   useEffect(() => {
@@ -202,10 +216,6 @@ export default function BookingDateTimeScreen() {
         )}
 
         {/* ── Calendar ─────────────────────────────────────────── */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 22, marginTop: 20 }}>
-          <CalendarIcon size={20} />
-          <Text style={{ fontSize: 15, fontWeight: '700', color: T.text }}>Choose a date</Text>
-        </View>
         <Calendar
           minDate={ymd(today)}
           maxDate={ymd(maxDate)}
@@ -252,6 +262,12 @@ export default function BookingDateTimeScreen() {
             <View style={{ width: 11, height: 11, borderRadius: 4, backgroundColor: T.input }} />
             <Text style={{ fontSize: 12, color: T.textFaint }}>Unavailable</Text>
           </View>
+          {loadingMonth && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+              <ActivityIndicator size="small" color={T.textFaint} />
+              <Text style={{ fontSize: 12, color: T.textFaint }}>Loading dates…</Text>
+            </View>
+          )}
         </View>
 
         {/* ── Time slots ───────────────────────────────────────── */}
@@ -261,15 +277,20 @@ export default function BookingDateTimeScreen() {
               <Clock size={24} color={T.textDisabled} />
               <Text style={{ fontSize: 13.5, color: T.textFaint }}>Choose a date to see available times.</Text>
             </View>
-          ) : !dayHours?.isOpen ? (
+          ) : loadingDay ? (
+            <View style={{ alignItems: 'center', paddingVertical: 26, gap: 10 }}>
+              <ActivityIndicator color={T.accent} />
+              <Text style={{ fontSize: 13.5, color: T.textFaint }}>Checking available times…</Text>
+            </View>
+          ) : !day?.isOpen ? (
             <View style={{ alignItems: 'center', paddingVertical: 26, gap: 8 }}>
-              <CalendarIcon size={30} style={{ opacity: 0.35 }} />
+              <CalendarX size={28} color={T.textDisabled} />
               <Text style={{ fontSize: 14, fontWeight: '700', color: T.textMuted }}>Closed on this day</Text>
               <Text style={{ fontSize: 13, color: T.textFaint }}>Please pick another date.</Text>
             </View>
           ) : slots.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 26, gap: 8, paddingHorizontal: 40 }}>
-              <CalendarIcon size={30} style={{ opacity: 0.35 }} />
+              <CalendarX size={28} color={T.textDisabled} />
               <Text style={{ fontSize: 14, fontWeight: '700', color: T.textMuted }}>Fully booked</Text>
               <Text style={{ fontSize: 13, color: T.textFaint, textAlign: 'center', lineHeight: 19 }}>
                 No {service?.durationMinutes}-minute openings left on this day. Try another date or barber.

@@ -21,6 +21,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useClientBrowseStore } from '@/stores/clientBrowseStore';
 import { authService } from '@/services/auth';
 import { uploadImage } from '@/services/uploads';
+import { SUPPORT_EMAIL } from '@/utils/constants';
 
 function SectionLabel({ children }: { children: string }) {
   return (
@@ -193,8 +194,13 @@ export default function ClientProfileScreen() {
           label="Help & Support"
           subtitle="Contact the Trimova team"
           onPress={() =>
-            Linking.openURL('mailto:support@trimova.app?subject=Trimova%20Support').catch(() =>
-              Alert.alert('Contact us', 'Email us at support@trimova.app'),
+            // Pre-fill the Support ID so we can find the account immediately.
+            Linking.openURL(
+              `mailto:${SUPPORT_EMAIL}?subject=Trimova%20Support&body=${encodeURIComponent(
+                `\n\n—\nSupport ID: ${user?.id ?? 'unknown'}\nAccount: ${user?.email ?? ''}`,
+              )}`,
+            ).catch(() =>
+              Alert.alert('Contact us', `Email us at ${SUPPORT_EMAIL}`),
             )
           }
         />

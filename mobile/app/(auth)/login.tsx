@@ -403,18 +403,8 @@ export default function LoginScreen() {
             )}
           </View>
 
-          {/* Staff invite entry point */}
-          <Pressable
-            onPress={() => router.push('/(auth)/join-staff')}
-            className="mt-6 items-center py-2"
-          >
-            <Text className="text-sm font-semibold" style={{ color: '#023047' }}>
-              I have an invite code
-            </Text>
-          </Pressable>
-
           {/* Bottom Link */}
-          <View className="flex-row justify-center items-center mt-4 gap-1">
+          <View className="flex-row justify-center items-center mt-8 gap-1">
             <Text className="text-sm text-neutral-500">
               {activeTab === 'signin' ? "Don't have an account?" : 'Already have an account?'}
             </Text>
