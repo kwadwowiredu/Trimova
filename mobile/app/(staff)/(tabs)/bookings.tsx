@@ -21,6 +21,8 @@ function toCardBooking(b: ApiBooking): Booking {
     startTime: b.scheduledAt,
     endTime: b.endsAt,
     locationAddress: b.clientLocation?.address ?? 'In shop',
+    requiresApproval: b.requiresApproval,
+    approvedAt: b.approvedAt,
   };
 }
 

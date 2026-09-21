@@ -12,6 +12,9 @@ import workingHoursRoutes from './routes/workingHours';
 import staffRoutes from './routes/staff';
 import bookingRoutes from './routes/bookings';
 import paymentRoutes from './routes/payments';
+import adminRoutes from './routes/admin';
+import notificationRoutes from './routes/notifications';
+import reviewRoutes from './routes/reviews';
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
@@ -42,6 +45,9 @@ app.use('/api/working-hours', workingHoursRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/reviews', reviewRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

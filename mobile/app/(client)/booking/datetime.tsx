@@ -65,7 +65,10 @@ export default function BookingDateTimeScreen() {
         durationMinutes: service!.durationMinutes,
       }),
     enabled: !!barberId && !!service,
-    staleTime: 60_000,
+    // Someone else can take a slot while this client is deciding, so treat
+    // availability as always stale and re-check it on every visit.
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
   const monthDates = monthData?.data.data.dates ?? {};
 
@@ -79,6 +82,11 @@ export default function BookingDateTimeScreen() {
         date: selectedDate!,
       }),
     enabled: !!barberId && !!selectedDate,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    // Keep the grid honest while the client browses: a slot taken by someone
+    // else should grey out here, not fail at checkout.
+    refetchInterval: 30_000,
   });
   const day = dayData?.data.data;
 
@@ -235,9 +243,9 @@ export default function BookingDateTimeScreen() {
             arrowColor: T.text,
             monthTextColor: T.text,
             textMonthFontSize: 18,
-            textMonthFontWeight: '800',
+            textMonthFontWeight: '600',
             textDayFontSize: 15.5,
-            textDayFontWeight: '600',
+            textDayFontWeight: '500',
             textDayHeaderFontSize: 11.5,
             textDayHeaderFontWeight: '700',
             textSectionTitleColor: T.textFaint,

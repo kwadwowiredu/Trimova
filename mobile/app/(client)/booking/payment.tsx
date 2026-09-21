@@ -4,16 +4,14 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Smartphone, CreditCard, Check, ShieldCheck, Timer, CheckCircle2, Car,
+  Smartphone, CreditCard, ShieldCheck, Timer, CheckCircle2, Car,
 } from 'lucide-react-native';
 import { bookingsService } from '@/services/bookings';
 import { getApiErrorMessage } from '@/services/api';
 import { useBookingStore, fmt12, fmtDateLong } from '@/stores/bookingStore';
 import { BookingHeader, BookingFooter } from '@/components/booking/BookingHeader';
-import { tapSelect, tapMedium } from '@/utils/haptics';
+import { tapMedium } from '@/utils/haptics';
 import { T, HAIRLINE, chip } from '@/constants/clientTheme';
-
-type Method = 'momo' | 'card';
 
 /**
  * Final step — pay for a booking that already exists on the server.
@@ -22,6 +20,11 @@ type Method = 'momo' | 'card';
  * only has to move money: initialize a Paystack charge, let the client
  * complete it, then have the API verify it. Paystack is the authority on
  * whether the charge succeeded — the app never decides that for itself.
+ *
+ * There's deliberately no payment-method picker here. Paystack's own checkout
+ * asks for the method (and handles the OTP/PIN steps that go with it), so
+ * choosing twice was busywork that could also disagree with what the client
+ * actually paid with.
  *
  * Reachable two ways: straight from the booking wizard, and from the bookings
  * list once a mobile barber has accepted a request (`?bookingId=`).
@@ -32,7 +35,6 @@ export default function BookingPaymentScreen() {
   const { bookingId: storeBookingId, holdExpiresAt, clearHold, reset } = useBookingStore();
   const bookingId = params.bookingId ?? storeBookingId;
 
-  const [method, setMethod] = useState<Method>('momo');
   const [paying, setPaying] = useState(false);
   const [done, setDone] = useState(false);
   const [remaining, setRemaining] = useState(0);
@@ -110,6 +112,8 @@ export default function BookingPaymentScreen() {
       const { data: verified } = await bookingsService.verifyPayment(booking.id, init.reference);
       clearHold();
       queryClient.invalidateQueries({ queryKey: ['bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['availability-day'] });
+      queryClient.invalidateQueries({ queryKey: ['availability-month'] });
       queryClient.setQueryData(['booking', booking.id], { data: verified });
       setDone(true);
     } catch (err) {
@@ -128,7 +132,7 @@ export default function BookingPaymentScreen() {
           <View style={{ width: 104, height: 104, borderRadius: 52, backgroundColor: ok.bg, alignItems: 'center', justifyContent: 'center' }}>
             <CheckCircle2 size={48} color={ok.fg} />
           </View>
-          <Text style={{ fontSize: 24, fontWeight: '800', color: T.text, marginTop: 24, textAlign: 'center' }}>
+          <Text style={{ fontSize: 24, fontWeight: '600', color: T.text, marginTop: 24, textAlign: 'center' }}>
             Appointment booked
           </Text>
           <Text style={{ fontSize: 14.5, color: T.textMuted, lineHeight: 22, marginTop: 10, textAlign: 'center' }}>
@@ -144,7 +148,7 @@ export default function BookingPaymentScreen() {
             onPress={() => { reset(); router.replace('/(client)/(tabs)/bookings' as never); }}
             style={{ marginTop: 28, backgroundColor: T.accent, borderRadius: 999, paddingHorizontal: 32, paddingVertical: 15 }}
           >
-            <Text style={{ color: T.onAccent, fontSize: 15, fontWeight: '700' }}>View my bookings</Text>
+            <Text style={{ color: T.onAccent, fontSize: 15, fontWeight: '600' }}>View my bookings</Text>
           </Pressable>
           <Pressable
             onPress={() => { reset(); router.replace('/(client)/(tabs)' as never); }}
@@ -163,11 +167,6 @@ export default function BookingPaymentScreen() {
   const warn = chip('warn');
   const ok = chip('success');
 
-  const METHODS: { id: Method; icon: React.ReactNode; title: string; sub: string }[] = [
-    { id: 'momo', icon: <Smartphone size={19} color={T.accent} />, title: 'Mobile Money', sub: 'MTN · Telecel · AT Money' },
-    { id: 'card', icon: <CreditCard size={19} color={T.accent} />, title: 'Debit / Credit card', sub: 'Visa · Mastercard' },
-  ];
-
   const startTime = booking.scheduledAt.slice(11, 16);
 
   return (
@@ -185,38 +184,38 @@ export default function BookingPaymentScreen() {
           </View>
         )}
 
-        <Text style={{ fontSize: 15, fontWeight: '700', color: T.text, marginBottom: 12 }}>Payment method</Text>
-        {METHODS.map((m) => {
-          const on = method === m.id;
-          return (
-            <Pressable
-              key={m.id}
-              onPress={() => { tapSelect(); setMethod(m.id); }}
-              style={{
-                flexDirection: 'row', alignItems: 'center', gap: 14,
-                borderWidth: on ? 1.5 : HAIRLINE, borderColor: on ? T.accent : T.border,
-                backgroundColor: T.card,
-                borderRadius: 16, padding: 16, marginBottom: 12,
-              }}
-            >
-              <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.accentWash, alignItems: 'center', justifyContent: 'center' }}>
-                {m.icon}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 15, fontWeight: '700', color: T.text }}>{m.title}</Text>
-                <Text style={{ fontSize: 12.5, color: T.textFaint, marginTop: 2 }}>{m.sub}</Text>
-              </View>
-              <View style={{
-                width: 24, height: 24, borderRadius: 12,
-                borderWidth: on ? 0 : 1.5, borderColor: T.border,
-                backgroundColor: on ? T.accent : 'transparent',
-                alignItems: 'center', justifyContent: 'center',
-              }}>
-                {on && <Check size={14} color={T.onAccent} strokeWidth={3} />}
-              </View>
-            </Pressable>
-          );
-        })}
+        {/* What Paystack will offer on the next screen — informational, not a
+            choice, so the client isn't asked the same question twice. */}
+        <Text style={{ fontSize: 15, fontWeight: '700', color: T.text, marginBottom: 12 }}>
+          How you&apos;ll pay
+        </Text>
+        <View style={{ backgroundColor: T.card, borderWidth: HAIRLINE, borderColor: T.border, borderRadius: 16, padding: 16, marginBottom: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.accentWash, alignItems: 'center', justifyContent: 'center' }}>
+              <Smartphone size={19} color={T.accent} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: T.text }}>Mobile Money</Text>
+              <Text style={{ fontSize: 12.5, color: T.textFaint, marginTop: 2 }}>MTN · Telecel · AT Money</Text>
+            </View>
+          </View>
+
+          <View style={{ height: HAIRLINE, backgroundColor: T.border, marginVertical: 14 }} />
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: T.accentWash, alignItems: 'center', justifyContent: 'center' }}>
+              <CreditCard size={19} color={T.accent} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: T.text }}>Debit / Credit card</Text>
+              <Text style={{ fontSize: 12.5, color: T.textFaint, marginTop: 2 }}>Visa · Mastercard</Text>
+            </View>
+          </View>
+        </View>
+
+        <Text style={{ fontSize: 12.5, color: T.textFaint, lineHeight: 18, marginBottom: 8 }}>
+          You&apos;ll pick one on the secure Paystack page after tapping pay.
+        </Text>
 
         {/* Total — recessed well */}
         <View style={{ backgroundColor: T.input, borderRadius: 18, padding: 18, marginTop: 8 }}>
@@ -237,7 +236,7 @@ export default function BookingPaymentScreen() {
           <View style={{ height: HAIRLINE, backgroundColor: T.border, marginVertical: 14 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Text style={{ flex: 1, fontSize: 16, fontWeight: '700', color: T.text }}>Total due</Text>
-            <Text style={{ fontSize: 21, fontWeight: '800', color: T.text }}>GH₵{booking.total.toFixed(2)}</Text>
+            <Text style={{ fontSize: 21, fontWeight: '600', color: '#52b788' }}>GH₵{booking.total.toFixed(2)}</Text>
           </View>
         </View>
 

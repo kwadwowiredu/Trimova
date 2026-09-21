@@ -1,4 +1,4 @@
-import { View, Image } from 'react-native';
+import { View, Image, type ColorValue } from 'react-native';
 import { User } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/authStore';
  * Profile tab icon: the user's own photo (with an active-tint ring when
  * focused), falling back to the generic person icon when no photo is set.
  */
-export function AvatarTabIcon({ color, size, focused }: { color: string; size: number; focused?: boolean }) {
+export function AvatarTabIcon({ color, size, focused }: { color: ColorValue; size: number; focused?: boolean }) {
   const avatarUrl = useAuthStore((s) => s.user?.avatarUrl);
   if (!avatarUrl) return <User size={size} color={color} />;
 

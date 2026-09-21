@@ -1,8 +1,9 @@
 import { View, Text, Pressable } from 'react-native';
-import { Calendar, MapPin, CheckCircle2, Circle } from 'lucide-react-native';
+import { Calendar, MapPin, CheckCircle2, Circle, Eye } from 'lucide-react-native';
 import { format, isToday, isTomorrow } from 'date-fns';
 import { Avatar } from '@/components/ui/Avatar';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { tapLight, tapMedium, tapSelect } from '@/utils/haptics';
 
 export type BookingStatus =
   | 'confirmed'
@@ -22,6 +23,14 @@ export interface Booking {
   startTime: string;
   endTime: string;
   locationAddress: string;
+  /** True for mobile barbers, who vet each job before the client may pay. */
+  requiresApproval: boolean;
+  /**
+   * When the barber accepted. A mobile booking stays `pending` after approval
+   * until the client pays, so status alone can't tell "needs my decision" from
+   * "waiting on their money" — this is what separates them.
+   */
+  approvedAt: string | null;
 }
 
 interface BookingCardProps {
@@ -34,6 +43,8 @@ interface BookingCardProps {
    *  pending) the card shows Accept / Decline actions. */
   onAccept?: (id: string) => void;
   onDecline?: (id: string) => void;
+  /** Opens the full appointment detail sheet, where cancelling lives. */
+  onOpen?: (id: string) => void;
 }
 
 function statusConfig(isDark: boolean): Record<BookingStatus, { label: string; bg: string; text: string }> {
@@ -62,16 +73,43 @@ export function BookingCard({
   onPress,
   onAccept,
   onDecline,
+  onOpen,
+
 }: BookingCardProps) {
   const c = useThemeColors();
   const status = statusConfig(c.isDark)[booking.status];
   const cardBg = isSelected ? c.accentSoft : c.surface;
-  const showRequestActions = booking.status === 'pending' && !!onAccept && !isSelectionMode;
+  // Only a request the barber hasn't answered yet needs Accept / Decline.
+  // Once approved it's the client's move, so the card drops to View details.
+  const awaitingDecision =
+    booking.status === 'pending' && booking.requiresApproval && !booking.approvedAt;
+  const showRequestActions = awaitingDecision && !!onAccept && !isSelectionMode;
+
+  // A booking that's still going ahead can be opened; one already closed can't.
+  const showManageActions =
+    !isSelectionMode &&
+    !showRequestActions &&
+    ['pending', 'confirmed', 'in_progress'].includes(booking.status);
 
   return (
     <Pressable
-      onLongPress={() => onLongPress?.(booking.id)}
-      onPress={() => isSelectionMode && onPress?.(booking.id)}
+      onLongPress={() => {
+        // Entering selection mode is a mode change — it should feel like one.
+        tapMedium();
+        onLongPress?.(booking.id);
+      }}
+      onPress={() => {
+        if (isSelectionMode) {
+          tapSelect();
+          onPress?.(booking.id);
+          return;
+        }
+        // Tapping the card anywhere opens it, which is what people try first.
+        if (onOpen) {
+          tapLight();
+          onOpen(booking.id);
+        }
+      }}
       delayLongPress={380}
       style={{
         backgroundColor: cardBg,
@@ -144,20 +182,40 @@ export function BookingCard({
           {showRequestActions && (
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
               <Pressable
-                onPress={() => onAccept?.(booking.id)}
+                onPress={() => { tapMedium(); onAccept?.(booking.id); }}
                 style={{ flex: 1, backgroundColor: c.accent, borderRadius: 12, paddingVertical: 11, alignItems: 'center' }}
                 className="active:opacity-80"
               >
-                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>Accept</Text>
+                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>
+                  {/* A mobile barber sets a travel fee while accepting, so the
+                      label has to promise a next step rather than finality. */}
+                  Review &amp; accept
+                </Text>
               </Pressable>
               <Pressable
-                onPress={() => onDecline?.(booking.id)}
+                onPress={() => { tapLight(); onDecline?.(booking.id); }}
                 style={{ flex: 1, borderRadius: 12, paddingVertical: 11, alignItems: 'center', borderWidth: 1.5, borderColor: c.danger }}
                 className="active:opacity-80"
               >
                 <Text style={{ color: c.danger, fontSize: 13, fontWeight: '700' }}>Decline</Text>
               </Pressable>
             </View>
+          )}
+
+          {/*
+            One way in. Cancelling lives inside the detail sheet, where the
+            barber can see who they'd be standing up and what it costs before
+            they commit — not as a button they can fat-finger on a list.
+          */}
+          {showManageActions && onOpen && (
+            <Pressable
+              onPress={() => { tapLight(); onOpen(booking.id); }}
+              style={{ flexDirection: 'row', gap: 6, borderRadius: 12, paddingVertical: 11, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: c.border, marginTop: 12 }}
+              className="active:opacity-80"
+            >
+              <Eye size={14} color={c.textMuted} />
+              <Text style={{ color: c.textMuted, fontSize: 13, fontWeight: '700' }}>View details</Text>
+            </Pressable>
           )}
         </View>
       </View>

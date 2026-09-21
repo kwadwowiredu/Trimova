@@ -10,6 +10,26 @@ import type { UserRole } from '../types/index';
 const BCRYPT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS ?? '12', 10);
 const INVITE_TTL_DAYS = 7;
 
+/** Escape user-supplied text before it goes into the invite landing page. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Where this API is reachable from a phone's browser. The invite email links
+ * here rather than at a custom scheme, because mail clients drop those.
+ */
+function invitePageUrl(token: string): string {
+  const base = (process.env.API_PUBLIC_URL ?? `http://localhost:${process.env.PORT ?? 3000}`)
+    .replace(/\/$/, '');
+  return `${base}/api/staff/invites/open?token=${encodeURIComponent(token)}`;
+}
+
 function signToken(userId: string, role: UserRole, email: string): string {
   return jwt.sign(
     { sub: userId, role, email },
@@ -144,7 +164,7 @@ export const staffController = {
       staffName: fullName.trim(),
       shopName: (profile?.business_name as string) || 'the team',
       ownerName: (owner.full_name as string) || 'The owner',
-      joinUrl: `${process.env.APP_URL ?? 'trimova://'}join-staff?token=${token}`,
+      joinUrl: invitePageUrl(token),
       expiresInDays: INVITE_TTL_DAYS,
     });
     const delivery = await sendEmail({ to: cleanEmail, ...mail });
@@ -189,7 +209,7 @@ export const staffController = {
       staffName: invite.full_name as string,
       shopName: (profile?.business_name as string) || 'the team',
       ownerName: (owner?.full_name as string) || 'The owner',
-      joinUrl: `${process.env.APP_URL ?? 'trimova://'}join-staff?token=${invite.token}`,
+      joinUrl: invitePageUrl(invite.token),
       expiresInDays: INVITE_TTL_DAYS,
     });
     const delivery = await sendEmail({ to: invite.email as string, ...mail });
@@ -362,6 +382,156 @@ export const staffController = {
       },
       'Welcome to the team!',
       201,
+    );
+  },
+
+  /**
+   * GET /staff/invites/open?token=…
+   *
+   * The landing page an invite email links to.
+   *
+   * Emailing a raw `exp://` or `trimova://` link doesn't work: mail clients
+   * strip or rewrite unknown schemes, so the button does nothing and the
+   * fallback link lands somewhere meaningless. An ordinary http(s) link always
+   * survives — and a custom scheme fired from a page the user already opened
+   * does reach the app.
+   */
+  async openInvite(req: Request, res: Response) {
+    const token = String(req.query.token ?? '');
+    const deepLink = `${process.env.APP_URL ?? 'trimova://'}join-staff?token=${encodeURIComponent(token)}`;
+
+    const supabase = getSupabase();
+    const { data: invite } = token
+      ? await supabase
+          .from('staff_invites')
+          .select('full_name, email, status, expires_at, owner:owner_id (full_name)')
+          .eq('token', token)
+          .maybeSingle()
+      : { data: null };
+
+    const owner = Array.isArray(invite?.owner) ? invite?.owner[0] : invite?.owner;
+    const expired = invite?.expires_at ? new Date(invite.expires_at) < new Date() : false;
+    const usable = Boolean(invite) && invite!.status === 'pending' && !expired;
+
+    const body = !invite
+      ? `<h1>This invitation link isn't valid</h1>
+         <p>It may have been revoked, or the link may have been copied incompletely. Ask whoever invited you to send a new one.</p>`
+      : !usable
+        ? `<h1>This invitation has ${expired ? 'expired' : 'already been used'}</h1>
+           <p>Ask ${escapeHtml(owner?.full_name ?? 'the shop owner')} to send you a fresh invitation.</p>`
+        : `<h1>You've been invited to join ${escapeHtml(owner?.full_name ?? 'a shop')}</h1>
+           <p>Hi ${escapeHtml(invite!.full_name as string)} — open this on the phone where you have Trimova installed, then tap below.</p>
+           <p><a class="btn" href="${escapeHtml(deepLink)}">Open in Trimova</a></p>
+           <p class="hint">Nothing happened? Open Trimova yourself and paste this code on the sign-in screen:</p>
+           <div class="code">${escapeHtml(token)}</div>
+           <p class="hint">This invitation only works with <strong>${escapeHtml(invite!.email as string)}</strong>.</p>`;
+
+    res.type('html').send(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Join your team on Trimova</title>
+  <style>
+    body { margin:0; padding:32px 20px; background:#f9f9ff; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; color:#161c27; }
+    .card { max-width:520px; margin:0 auto; background:#fff; border:1px solid #E2E8F8; border-radius:18px; padding:28px; }
+    .brand { font-size:20px; font-weight:800; letter-spacing:-0.3px; margin-bottom:18px; }
+    h1 { font-size:21px; margin:0 0 14px; }
+    p { font-size:15px; line-height:22px; color:#464554; margin:0 0 16px; }
+    .btn { display:inline-block; background:#023047; color:#fff; text-decoration:none; font-weight:700; padding:14px 28px; border-radius:12px; }
+    .hint { font-size:13px; color:#8a89a3; }
+    .code { font-family:ui-monospace,Menlo,monospace; font-size:13px; background:#f1f3ff; border:1px solid #E2E8F8; border-radius:10px; padding:12px 14px; word-break:break-all; margin-bottom:16px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">Trimova</div>
+    ${body}
+  </div>
+</body>
+</html>`);
+  },
+
+  /**
+   * GET /staff/roster — the shop owner's own team, with real performance.
+   *
+   * Richer than the public /barbers/:id/staff view: an owner needs contact
+   * details and this month's numbers, which a browsing client has no business
+   * seeing. Every figure is derived from appointments, so it can't go stale.
+   */
+  async roster(req: Request, res: Response) {
+    const supabase = getSupabase();
+    const ownerId = req.user!.sub;
+
+    const { data: profiles, error } = await supabase
+      .from('barber_profiles')
+      .select(`
+        user_id, rating, review_count, is_available, created_at,
+        user:user_id (id, full_name, email, phone, avatar_url, is_active, created_at)
+      `)
+      .eq('owner_id', ownerId);
+
+    if (error) {
+      console.error('[staff] roster failed:', error);
+      sendError(res, "We couldn't load your team. Please try again.", 500);
+      return;
+    }
+
+    const members = (profiles ?? []).filter((p: Record<string, any>) => {
+      const user = Array.isArray(p.user) ? p.user[0] : p.user;
+      return user && user.is_active !== false;
+    });
+
+    if (members.length === 0) {
+      sendSuccess(res, []);
+      return;
+    }
+
+    // One query for everyone's appointments beats one query per barber.
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+
+    const staffIds = members.map((m: Record<string, any>) => m.user_id);
+    const { data: appointments } = await supabase
+      .from('appointments')
+      .select('staff_barber_id, status, service_price, travel_fee, completed_at')
+      .in('staff_barber_id', staffIds);
+
+    const stats = new Map<string, { completed: number; revenue: number }>();
+    for (const id of staffIds) stats.set(id, { completed: 0, revenue: 0 });
+
+    for (const a of appointments ?? []) {
+      const entry = stats.get(a.staff_barber_id as string);
+      if (!entry || a.status !== 'completed') continue;
+      entry.completed += 1;
+      // "This month" is about work finished, not booked.
+      if (a.completed_at && new Date(a.completed_at) >= monthStart) {
+        entry.revenue +=
+          (parseFloat(String(a.service_price)) || 0) + (parseFloat(String(a.travel_fee)) || 0);
+      }
+    }
+
+    sendSuccess(
+      res,
+      members.map((p: Record<string, any>) => {
+        const user = Array.isArray(p.user) ? p.user[0] : p.user;
+        const stat = stats.get(p.user_id) ?? { completed: 0, revenue: 0 };
+        return {
+          id: p.user_id,
+          name: user.full_name,
+          role: 'Staff Barber',
+          rating: parseFloat(String(p.rating)) || 0,
+          reviewCount: Number(p.review_count) || 0,
+          avatarUrl: user.avatar_url ?? null,
+          isActive: p.is_available !== false,
+          totalAppointments: stat.completed,
+          revenueThisMonth: Math.round(stat.revenue * 100) / 100,
+          phoneNumber: user.phone ?? '',
+          email: user.email,
+          joinedDate: user.created_at,
+        };
+      }),
     );
   },
 };

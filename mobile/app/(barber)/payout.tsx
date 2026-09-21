@@ -21,6 +21,8 @@ import {
 } from 'lucide-react-native';
 import { ActivityIndicator } from 'react-native';
 import { useThemeColors } from '@/hooks/useThemeColors';
+import { useQuery } from '@tanstack/react-query';
+import { paymentsService } from '@/services/payments';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/services/auth';
 import { getApiErrorMessage } from '@/services/api';
@@ -49,13 +51,31 @@ const EMPTY_METHOD: PayoutMethod = {
   type: 'mobile_money',
 };
 
-const MOCK_TRANSACTIONS: Transaction[] = [
-  { id: '1', date: '15 Jun 2026', amount: 1240,  status: 'success', reference: 'TRV-2026-0615' },
-  { id: '2', date: '1 Jun 2026',  amount: 980,   status: 'success', reference: 'TRV-2026-0601' },
-  { id: '3', date: '15 May 2026', amount: 1560,  status: 'success', reference: 'TRV-2026-0515' },
-  { id: '4', date: '1 May 2026',  amount: 820,   status: 'success', reference: 'TRV-2026-0501' },
-  { id: '5', date: '15 Apr 2026', amount: 640,   status: 'pending', reference: 'TRV-2026-0415' },
-];
+/**
+ * A barber's payouts are the `transfer` lines in the money ledger — what they
+ * were owed once each appointment completed. Deposits and commission belong to
+ * the platform's books, not this screen.
+ */
+function usePayoutHistory(): Transaction[] {
+  const { data } = useQuery({
+    queryKey: ['my-transactions'],
+    queryFn: () => paymentsService.getMyTransactions(),
+  });
+
+  return (data?.data.data ?? [])
+    .filter((t) => t.type === 'transfer')
+    .map((t) => ({
+      id: t.id,
+      date: new Date(t.createdAt).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }),
+      amount: t.amount,
+      status: t.status === 'success' ? ('success' as const) : ('pending' as const),
+      reference: t.reference,
+    }));
+}
 
 function ProviderPickerModal({
   visible,
@@ -89,6 +109,7 @@ function ProviderPickerModal({
 }
 
 export default function PayoutScreen() {
+  const transactions = usePayoutHistory();
   const insets = useSafeAreaInsets();
   const c = useThemeColors();
   const { user, updateUser, mergeUser } = useAuthStore();
@@ -257,7 +278,11 @@ export default function PayoutScreen() {
         <Text style={{ fontSize: 11, fontWeight: '800', color: c.textFaint, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10, marginLeft: 2 }}>
           Payout History
         </Text>
-        {MOCK_TRANSACTIONS.map((tx) => (
+        {transactions.length === 0 ? (
+          <Text style={{ fontSize: 13, color: c.textFaint, paddingVertical: 8 }}>
+            No payouts yet. Completed appointments show up here once the money is released.
+          </Text>
+        ) : transactions.map((tx) => (
           <View key={tx.id} style={{
             backgroundColor: c.surface,
             borderRadius: 14,

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { format } from 'date-fns';
-import { Clock, CalendarDays, Scissors, Bell } from 'lucide-react-native';
+import { Clock, CalendarDays, Scissors } from 'lucide-react-native';
+import { NotificationBell } from '@/components/ui/NotificationBell';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { useAuthStore } from '@/stores/authStore';
 import { workingHoursService, type DaySchedule } from '@/services/workingHours';
@@ -47,9 +48,11 @@ export default function StaffTodayScreen() {
               {today?.isOpen ? `  ·  ${today.openTime} – ${today.closeTime}` : '  ·  Off today'}
             </Text>
           </View>
-          <Pressable hitSlop={10}>
-            <Bell size={22} color="rgba(255,255,255,0.9)" />
-          </Pressable>
+          <NotificationBell
+            route="/(staff)/notifications"
+            color="rgba(255,255,255,0.9)"
+            badgeBorderColor="#2D27A8"
+          />
         </View>
       </View>
 

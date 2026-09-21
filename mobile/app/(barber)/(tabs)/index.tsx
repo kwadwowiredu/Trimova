@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,19 +9,24 @@ import {
   TouchableOpacity,
   Alert,
   ScrollView,
+  FlatList,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Calendar as BigCalendar, type ICalendarEventBase } from 'react-native-big-calendar';
-import { format, addDays, startOfWeek, isSameDay } from 'date-fns';
-import { Bell, Plus, X, Clock, Info } from 'lucide-react-native';
+import { format, addDays, startOfDay, isSameDay } from 'date-fns';
+import { Plus, X, Clock, Info } from 'lucide-react-native';
+import { NotificationBell } from '@/components/ui/NotificationBell';
 import { useAuthStore } from '@/stores/authStore';
 import type { BarberProfile } from '@/types/user';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { CompleteProfileBanner, isProfileIncomplete } from '@/components/barber/CompleteProfileBanner';
 import { useRefreshSignal } from '@/stores/refreshSignal';
 import { workingHoursService, type DaySchedule } from '@/services/workingHours';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { tapSelect } from '@/utils/haptics';
 import { bookingsService } from '@/services/bookings';
+import { getApiErrorMessage } from '@/services/api';
+
 import type { Booking as ApiBooking } from '@/types/booking';
 
 // Turn "HH:MM" into a fractional hour (e.g. "09:30" → 9.5).
@@ -77,6 +82,11 @@ const HOUR_ROW_HEIGHT = 80;
 
 // ─── Week day selector ────────────────────────────────────────────────────────
 
+/** How many days either side of today the strip can reach. */
+const STRIP_PAST_DAYS = 7;
+const STRIP_FUTURE_DAYS = 60;
+const DAY_CELL_WIDTH = 54;
+
 function WeekDaySelector({
   selectedDate,
   onSelect,
@@ -84,38 +94,91 @@ function WeekDaySelector({
   selectedDate: Date;
   onSelect: (date: Date) => void;
 }) {
-  const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 });
-  const days      = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const today     = new Date();
+  const listRef = useRef<FlatList<Date>>(null);
+  const today = new Date();
+
+  // A fixed week meant a barber couldn't reach next month without leaving the
+  // screen. The strip now scrolls across the whole booking window.
+  const start = addDays(startOfDay(today), -STRIP_PAST_DAYS);
+  const days = useMemo(
+    () =>
+      Array.from(
+        { length: STRIP_PAST_DAYS + STRIP_FUTURE_DAYS + 1 },
+        (_, i) => addDays(start, i),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const selectedIndex = days.findIndex((d) => isSameDay(d, selectedDate));
+
+  // Keep the chosen day in view when it changes from elsewhere (e.g. tapping
+  // a notification), without fighting the user mid-scroll.
+  useEffect(() => {
+    if (selectedIndex < 0) return;
+    listRef.current?.scrollToIndex({
+      index: selectedIndex,
+      animated: true,
+      viewPosition: 0.5,
+    });
+  }, [selectedIndex]);
 
   return (
-    <View className="flex-row px-2 py-2 bg-white border-b border-neutral-100">
-      {days.map((day) => {
-        const isSelected = isSameDay(day, selectedDate);
-        const isToday    = isSameDay(day, today);
-        return (
-          <Pressable
-            key={day.toISOString()}
-            onPress={() => onSelect(day)}
-            className={`flex-1 items-center py-1.5 rounded-xl ${isSelected ? 'bg-accent' : ''}`}
-          >
-            <Text
-              className={`text-[10px] font-semibold ${
-                isSelected ? 'text-white' : 'text-neutral-400'
-              }`}
+    <View className="bg-white border-b border-neutral-100">
+      <FlatList
+        ref={listRef}
+        data={days}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        keyExtractor={(d) => d.toISOString()}
+        contentContainerStyle={{ paddingHorizontal: 8, paddingVertical: 8 }}
+        // Uniform cells, so scrollToIndex never has to measure.
+        getItemLayout={(_, index) => ({
+          length: DAY_CELL_WIDTH,
+          offset: DAY_CELL_WIDTH * index,
+          index,
+        })}
+        initialScrollIndex={Math.max(0, selectedIndex)}
+        onScrollToIndexFailed={() => {
+          // Layout not settled yet — the effect above retries once it is.
+        }}
+        renderItem={({ item: day }) => {
+          const isSelected = isSameDay(day, selectedDate);
+          const isToday = isSameDay(day, today);
+          const startsMonth = day.getDate() === 1;
+
+          return (
+            <Pressable
+              onPress={() => { tapSelect(); onSelect(day); }}
+              style={{ width: DAY_CELL_WIDTH }}
+              className={`items-center py-1.5 rounded-xl ${isSelected ? 'bg-accent' : ''}`}
             >
-              {format(day, 'EEE').toUpperCase()}
-            </Text>
-            <Text
-              className={`text-[15px] font-bold mt-1 ${
-                isSelected ? 'text-white' : isToday ? 'text-accent' : 'text-neutral-800'
-              }`}
-            >
-              {format(day, 'd')}
-            </Text>
-          </Pressable>
-        );
-      })}
+              {/* Month marker so a long scroll doesn't lose its bearings. */}
+              <Text
+                className={`text-[9px] font-bold ${
+                  isSelected ? 'text-white/70' : 'text-neutral-300'
+                }`}
+              >
+                {startsMonth || isToday ? format(day, 'MMM').toUpperCase() : ' '}
+              </Text>
+              <Text
+                className={`text-[10px] font-semibold ${
+                  isSelected ? 'text-white' : 'text-neutral-400'
+                }`}
+              >
+                {format(day, 'EEE').toUpperCase()}
+              </Text>
+              <Text
+                className={`text-[15px] font-bold mt-0.5 ${
+                  isSelected ? 'text-white' : isToday ? 'text-accent' : 'text-neutral-800'
+                }`}
+              >
+                {format(day, 'd')}
+              </Text>
+            </Pressable>
+          );
+        }}
+      />
     </View>
   );
 }
@@ -506,6 +569,7 @@ export default function BarberHomeScreen() {
   const [breakToDelete, setBreakToDelete]   = useState<ScheduleEvent | null>(null);
   const [schedule, setSchedule]             = useState<DaySchedule[] | null>(null);
 
+  const queryClient = useQueryClient();
   const showBanner = isProfileIncomplete(barber);
 
   /**
@@ -520,6 +584,10 @@ export default function BarberHomeScreen() {
         date: dateKey,
         status: 'pending,confirmed,in_progress,completed',
       }),
+    // A booking made while the barber is looking at their day should land on
+    // the calendar without them doing anything.
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   });
   const appointments = dayBookings?.data.data ?? [];
 
@@ -533,6 +601,76 @@ export default function BarberHomeScreen() {
     }
   }, []);
   useEffect(() => { loadSchedule(); }, [loadSchedule]);
+
+  // Breaks are stored per weekday, so rebuild the chosen day's blocks from the
+  // saved schedule whenever either changes. Without this they'd vanish from
+  // the calendar on reload even though the client's picker still honours them.
+  useEffect(() => {
+    if (!schedule) {
+      setBreaks([]);
+      return;
+    }
+    const day = schedule.find((d) => d.day === format(selectedDate, 'EEEE'));
+    setBreaks(
+      (day?.breaks ?? []).map((b) => {
+        const [sh, sm] = b.start.split(':').map(Number);
+        const [eh, em] = b.end.split(':').map(Number);
+        const base = startOfDay(selectedDate);
+        return {
+          title: 'Break',
+          start: new Date(base.getFullYear(), base.getMonth(), base.getDate(), sh, sm),
+          end: new Date(base.getFullYear(), base.getMonth(), base.getDate(), eh, em),
+          color: '#94A3B8',
+          serviceName: 'Break',
+          eventType: 'break' as const,
+        };
+      }),
+    );
+  }, [schedule, selectedDate]);
+
+  /**
+   * Breaks live in the `breaks` table, keyed by day of week — the same table
+   * the client's slot picker reads. Editing them here has to go through the
+   * working-hours API, otherwise a barber blocks out lunch and clients can
+   * still book straight through it.
+   */
+  const persistBreaks = useCallback(
+    async (nextForDay: ScheduleEvent[]) => {
+      if (!schedule) {
+        Alert.alert(
+          'Set your working hours first',
+          'Breaks sit inside your opening hours, so add those before blocking time out.',
+        );
+        return false;
+      }
+
+      const dayName = format(selectedDate, 'EEEE');
+      const updated = schedule.map((d) =>
+        d.day === dayName
+          ? {
+              ...d,
+              breaks: nextForDay.map((b) => ({
+                start: format(b.start, 'HH:mm'),
+                end: format(b.end, 'HH:mm'),
+              })),
+            }
+          : d,
+      );
+
+      try {
+        await workingHoursService.save(updated);
+        setSchedule(updated);
+        // The client's picker caches availability; make it re-check.
+        queryClient.invalidateQueries({ queryKey: ['availability-day'] });
+        queryClient.invalidateQueries({ queryKey: ['availability-month'] });
+        return true;
+      } catch (err) {
+        Alert.alert('Break not saved', getApiErrorMessage(err));
+        return false;
+      }
+    },
+    [schedule, selectedDate, queryClient],
+  );
 
   // Tap the Home tab → jump back to today and re-pull the schedule.
   const barberHomeNonce = useRefreshSignal((s) => s.barberHome);
@@ -606,10 +744,11 @@ export default function BarberHomeScreen() {
               {workingHours}
             </Text>
           </View>
-          <Pressable className="relative p-1" hitSlop={10}>
-            <Bell size={22} color="rgba(255,255,255,0.9)" />
-            <View className="absolute top-1 right-1 w-2 h-2 rounded-full bg-danger border-2 border-white" />
-          </Pressable>
+          <NotificationBell
+            route="/(barber)/notifications"
+            color="rgba(255,255,255,0.9)"
+            badgeBorderColor="#2D27A8"
+          />
         </View>
       </View>
 
@@ -760,18 +899,27 @@ export default function BarberHomeScreen() {
       <BreakModal
         visible={showBreakModal}
         onClose={() => setShowBreakModal(false)}
-        onAdd={(breakEvent) => setBreaks((prev) => [...prev, breakEvent])}
+        onAdd={async (breakEvent) => {
+          const next = [...breaks, breakEvent];
+          // Show it immediately, then roll back if the save is rejected.
+          setBreaks(next);
+          const saved = await persistBreaks(next);
+          if (!saved) setBreaks(breaks);
+        }}
       />
 
       {/* ── Remove-break confirmation ─────────────────────────── */}
       <ConfirmModal
         visible={breakToDelete !== null}
         onClose={() => setBreakToDelete(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (breakToDelete) {
-            setBreaks((prev) =>
-              prev.filter((b) => b.start.getTime() !== breakToDelete.start.getTime()),
+            const next = breaks.filter(
+              (b) => b.start.getTime() !== breakToDelete.start.getTime(),
             );
+            setBreaks(next);
+            const saved = await persistBreaks(next);
+            if (!saved) setBreaks(breaks);
           }
           setBreakToDelete(null);
         }}

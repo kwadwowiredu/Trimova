@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { barberController } from '../controllers/barberController';
+import { reviewController } from '../controllers/reviewController';
 import { authenticate, requireRole } from '../middleware/auth';
 
 const router = Router();
@@ -26,6 +27,11 @@ router.put(
 );
 
 // ── Public: must be last (catches /:id) ────────────────────────────────────
+// The nested routes come first so "staff"/"reviews" aren't read as an :id.
+// GET /api/barbers/:id/staff
+router.get('/:id/staff', reviewController.listStaff);
+// GET /api/barbers/:id/reviews?staffId=
+router.get('/:id/reviews', reviewController.listForBarber);
 // GET /api/barbers/:id
 router.get('/:id', barberController.getById);
 

@@ -7,6 +7,7 @@ import {
   ArrowLeft, Check, Timer, Car, Store, Info, MapPin,
 } from 'lucide-react-native';
 import { barbersService } from '@/services/barbers';
+import { isAxiosError } from 'axios';
 import { bookingsService } from '@/services/bookings';
 import { getApiErrorMessage } from '@/services/api';
 import {
@@ -76,8 +77,11 @@ export default function BookingSummaryScreen() {
 
       const booking = data.data;
       setBooking(booking.id, booking.holdExpiresAt);
-      // The barber's list should show this immediately.
+      // The barber's list should show this immediately, and the slot we just
+      // took must disappear from everyone's picker.
       queryClient.invalidateQueries({ queryKey: ['bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['availability-day'] });
+      queryClient.invalidateQueries({ queryKey: ['availability-month'] });
 
       if (booking.requiresApproval) {
         clearHold();
@@ -92,6 +96,24 @@ export default function BookingSummaryScreen() {
       }
       router.push('/(client)/booking/payment' as never);
     } catch (err) {
+      // 409 means someone took this slot in the seconds since we last checked.
+      // Refresh availability and send them back, so the time is already greyed
+      // out rather than leaving them to guess what else is free.
+      if (isAxiosError(err) && err.response?.status === 409) {
+        await queryClient.invalidateQueries({ queryKey: ['availability-day'] });
+        await queryClient.invalidateQueries({ queryKey: ['availability-month'] });
+        Alert.alert(
+          'That time was just taken',
+          'Someone booked this slot moments ago. Here are the times still available.',
+          [
+            {
+              text: 'Pick another time',
+              onPress: () => router.replace('/(client)/booking/datetime' as never),
+            },
+          ],
+        );
+        return;
+      }
       Alert.alert('Booking not created', getApiErrorMessage(err));
     } finally {
       setSubmitting(false);
@@ -148,10 +170,10 @@ export default function BookingSummaryScreen() {
             <ArrowLeft size={24} color={T.text} strokeWidth={2.2} />
           </Pressable>
 
-          <Text style={{ fontSize: 29, fontWeight: '800', color: T.text, letterSpacing: -0.5 }}>
+          <Text style={{ fontSize: 24, fontWeight: '600', color: T.text, letterSpacing: -0.5 }}>
             Review and confirm
           </Text>
-          <Text style={{ fontSize: 17.5, fontWeight: '700', color: T.text, marginTop: 12 }}>
+          <Text style={{ fontSize: 17, fontWeight: '600', color: T.text, marginTop: 12 }}>
             {fmtDateLong(date)} • {fmt12(time)}
           </Text>
           <Text style={{ fontSize: 14, color: T.textFaint, marginTop: 5, lineHeight: 20 }}>
@@ -173,8 +195,8 @@ export default function BookingSummaryScreen() {
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-            <Text style={{ flex: 1, fontSize: 17, fontWeight: '700', color: T.text }}>{service.name}</Text>
-            <Text style={{ fontSize: 17, fontWeight: '700', color: T.text }}>GH₵{service.price.toFixed(2)}</Text>
+            <Text style={{ flex: 1, fontSize: 17, fontWeight: '600', color: T.text }}>{service.name}</Text>
+            <Text style={{ fontSize: 17, fontWeight: '600', color: '#52b788' }}>GH₵{service.price.toFixed(2)}</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginTop: 4 }}>
             <Text style={{ flex: 1, fontSize: 13.5, color: T.textFaint }}>
@@ -201,8 +223,8 @@ export default function BookingSummaryScreen() {
           <View style={{ height: HAIRLINE, backgroundColor: T.border, marginVertical: 16 }} />
 
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={{ flex: 1, fontSize: 16, fontWeight: '700', color: T.text }}>Subtotal</Text>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: T.text }}>GH₵{service.price.toFixed(2)}</Text>
+            <Text style={{ flex: 1, fontSize: 16, fontWeight: '600', color: T.text }}>Subtotal</Text>
+            <Text style={{ fontSize: 16, fontWeight: '600', color: '#52b788' }}>GH₵{service.price.toFixed(2)}</Text>
           </View>
         </View>
 
@@ -211,7 +233,7 @@ export default function BookingSummaryScreen() {
           <View style={{ marginHorizontal: 20, marginTop: 14, backgroundColor: warn.bg, borderRadius: 16, padding: 15, flexDirection: 'row', gap: 11 }}>
             <Info size={17} color={warn.fg} style={{ marginTop: 1 }} />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: warn.fg }}>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: warn.fg }}>
                 {outOfRange ? "You're outside the travel range" : 'This barber confirms each booking'}
               </Text>
               <Text style={{ fontSize: 13, color: warn.fg, opacity: 0.85, marginTop: 3, lineHeight: 18 }}>
@@ -226,7 +248,7 @@ export default function BookingSummaryScreen() {
           <View style={{ marginHorizontal: 20, marginTop: 14, backgroundColor: warn.bg, borderRadius: 16, padding: 15, flexDirection: 'row', gap: 11 }}>
             <Timer size={17} color={warn.fg} style={{ marginTop: 1 }} />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: warn.fg }}>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: warn.fg }}>
                 Your slot is held for {holdMinutes} minutes once you continue
               </Text>
               <Text style={{ fontSize: 13, color: warn.fg, opacity: 0.8, marginTop: 3, lineHeight: 18 }}>
@@ -290,7 +312,7 @@ export default function BookingSummaryScreen() {
           <Text style={{ flex: 1, fontSize: 14.5, color: T.textMuted, fontWeight: '600' }}>
             {needsRequest ? 'Service price (travel fee added on approval)' : 'Total booking price'}
           </Text>
-          <Text style={{ fontSize: 19, fontWeight: '800', color: T.text }}>GH₵{service.price.toFixed(2)}</Text>
+          <Text style={{ fontSize: 19, fontWeight: '600', color: '#52b788' }}>GH₵{service.price.toFixed(2)}</Text>
         </View>
         <Pressable
           onPress={handleCommit}
@@ -303,7 +325,7 @@ export default function BookingSummaryScreen() {
           {submitting ? (
             <ActivityIndicator color={T.textDisabled} />
           ) : (
-            <Text style={{ color: agreed ? T.onAccent : T.textDisabled, fontSize: 15.5, fontWeight: '700' }}>
+            <Text style={{ color: agreed ? T.onAccent : T.textDisabled, fontSize: 15, fontWeight: '600' }}>
               {needsRequest ? 'Send booking request' : 'Continue to payment'}
             </Text>
           )}

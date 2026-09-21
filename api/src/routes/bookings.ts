@@ -25,7 +25,11 @@ router.get(
 
 // Either party
 router.get('/:id', authenticate, bookingController.getById);
+router.get('/:id/policy', authenticate, bookingController.policy);
 router.patch('/:id/cancel', authenticate, bookingController.cancel);
+router.patch('/:id/reschedule', authenticate, bookingController.reschedule);
+router.patch('/:id/confirm-service', authenticate, requireRole('client'), bookingController.confirmService);
+router.patch('/:id/dispute', authenticate, requireRole('client'), bookingController.dispute);
 
 // Barber-only transitions
 router.patch(

@@ -68,7 +68,9 @@ export default function BookingServiceScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: T.canvas }}>
-      <BookingHeader title="Select a service" subtitle={title} />
+      <View>
+        <BookingHeader title="Select a service" subtitle={title} />
+      </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
         {isLoading ? (
@@ -93,16 +95,16 @@ export default function BookingServiceScreen() {
                   borderWidth: on ? 1.5 : HAIRLINE,
                   borderColor: on ? T.accent : T.border,
                   backgroundColor: T.card,
-                  borderRadius: 18, padding: 16, marginBottom: 12,
+                  borderRadius: 10, padding: 14, marginBottom: 10,
                 }}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16.5, fontWeight: '700', color: T.text }}>{s.name}</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: T.accent }}>{s.name}</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 5 }}>
                     <Clock size={12} color={T.textFaint} />
                     <Text style={{ fontSize: 13, color: T.textFaint }}>{fmtDuration(s.durationMinutes)}</Text>
                   </View>
-                  <Text style={{ fontSize: 15.5, fontWeight: '800', color: T.text, marginTop: 7 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#52b788', marginTop: 7 }}>
                     GH₵{s.price.toFixed(0)}
                   </Text>
                 </View>

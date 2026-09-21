@@ -1,16 +1,17 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
-  View, Text, Pressable, FlatList, ActivityIndicator, RefreshControl, Alert, Image,
+  View, Text, Pressable, FlatList, RefreshControl, Image,
 } from 'react-native';
 import { router } from 'expo-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Clock, MapPin, Car, Store, ChevronRight } from 'lucide-react-native';
+import { useQuery } from '@tanstack/react-query';
+import { Car, Store, UserRound } from 'lucide-react-native';
 import { CalendarBadge } from '@/components/ui/Icons';
+import { BookingListSkeleton } from '@/components/client/BookingSkeleton';
+import { AppointmentDetailSheet } from '@/components/client/AppointmentDetailSheet';
 import { bookingsService } from '@/services/bookings';
-import { getApiErrorMessage } from '@/services/api';
-import { fmt12, fmtDateLong } from '@/stores/bookingStore';
-import { bookingBadge, isUpcoming, awaitingPayment, splitScheduled } from '@/utils/bookingStatus';
-import { tapSelect, tapMedium } from '@/utils/haptics';
+import { fmt12 } from '@/stores/bookingStore';
+import { bookingBadge, isUpcoming, splitScheduled } from '@/utils/bookingStatus';
+import { tapSelect } from '@/utils/haptics';
 import { T, HAIRLINE, chip } from '@/constants/clientTheme';
 import type { Booking } from '@/types/booking';
 
@@ -18,41 +19,33 @@ type Tab = 'upcoming' | 'past';
 
 /** The client's side of the booking transaction — everything they've booked. */
 export default function BookingsScreen() {
-  const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>('upcoming');
+  const [openBookingId, setOpenBookingId] = useState<string | null>(null);
+  // Pull-to-refresh gets its own flag. Wiring the spinner to react-query's
+  // isRefetching leaves it spinning after a background invalidation from
+  // another screen, because nothing ever tells the control to retract.
+  const [pulling, setPulling] = useState(false);
 
-  const { data, isLoading, isRefetching, refetch } = useQuery({
+  const { data, isLoading, refetch } = useQuery({
     queryKey: ['bookings', 'client'],
     queryFn: () => bookingsService.getClientBookings({ page: 1 }),
+    // A barber accepting a request or cancelling should show up here on its
+    // own — the client shouldn't have to pull to find out.
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   });
+
+  const onPullRefresh = useCallback(async () => {
+    setPulling(true);
+    try {
+      await refetch();
+    } finally {
+      setPulling(false);
+    }
+  }, [refetch]);
 
   const all = data?.data.data ?? [];
   const bookings = all.filter((b) => (tab === 'upcoming' ? isUpcoming(b) : !isUpcoming(b)));
-
-  async function handleCancel(booking: Booking) {
-    tapMedium();
-    Alert.alert(
-      'Cancel this booking?',
-      booking.paymentStatus === 'paid'
-        ? 'Your payment will be refunded to the account you paid from.'
-        : 'The slot will be released for someone else to book.',
-      [
-        { text: 'Keep it', style: 'cancel' },
-        {
-          text: 'Cancel booking',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await bookingsService.cancel(booking.id);
-              queryClient.invalidateQueries({ queryKey: ['bookings'] });
-            } catch (err) {
-              Alert.alert('Not cancelled', getApiErrorMessage(err));
-            }
-          },
-        },
-      ],
-    );
-  }
 
   return (
     <View style={{ flex: 1, backgroundColor: T.canvas }}>
@@ -76,7 +69,7 @@ export default function BookingsScreen() {
                 borderWidth: on ? 0 : HAIRLINE, borderColor: T.border,
               }}
             >
-              <Text style={{ fontSize: 14, fontWeight: '700', color: on ? T.onAccent : T.textMuted }}>
+              <Text style={{ fontSize: 13, fontWeight: '600', color: on ? T.onAccent : T.textMuted }}>
                 {t === 'upcoming' ? 'Upcoming' : 'Past'}{count ? ` · ${count}` : ''}
               </Text>
             </Pressable>
@@ -85,13 +78,11 @@ export default function BookingsScreen() {
       </View>
 
       {isLoading ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator color={T.accent} />
-        </View>
+        <BookingListSkeleton />
       ) : bookings.length === 0 ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
           <CalendarBadge size={64} />
-          <Text style={{ fontSize: 18, fontWeight: '600', color: T.accent, marginTop: 16, textAlign: 'center' }}>
+          <Text style={{ fontSize: 16, fontWeight: '600', color: T.accent, marginTop: 16, textAlign: 'center' }}>
             {tab === 'upcoming' ? 'No bookings yet' : 'Nothing here yet'}
           </Text>
           <Text style={{ fontSize: 14, color: T.textFaint, marginTop: 8, textAlign: 'center', lineHeight: 20 }}>
@@ -115,125 +106,124 @@ export default function BookingsScreen() {
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 28 }}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={T.accent} />
+            <RefreshControl refreshing={pulling} onRefresh={onPullRefresh} tintColor={T.accent} />
           }
           renderItem={({ item }) => (
-            <BookingCard booking={item} onCancel={() => handleCancel(item)} />
+            <BookingCard
+              booking={item}
+              onPress={() => { tapSelect(); setOpenBookingId(item.id); }}
+            />
           )}
         />
       )}
+
+      <AppointmentDetailSheet
+        bookingId={openBookingId}
+        onClose={() => setOpenBookingId(null)}
+      />
     </View>
   );
 }
 
-function BookingCard({ booking, onCancel }: { booking: Booking; onCancel: () => void }) {
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * A booking at a glance: what, with whom, and when.
+ *
+ * Deliberately has no buttons. Three actions crammed onto a card overflowed on
+ * narrow screens, and none of them are ones you want a client firing by
+ * accident — they live in the detail sheet, one tap away.
+ */
+function BookingCard({ booking, onPress }: { booking: Booking; onPress: () => void }) {
   const badge = bookingBadge(booking);
   const tone = chip(badge.tone);
   const { date, time } = splitScheduled(booking.scheduledAt);
-  const canPay = awaitingPayment(booking);
-  const canCancel = isUpcoming(booking);
+  const [year, month, day] = date.split('-').map(Number);
   const isMobileJob = !!booking.clientLocation;
 
-  const initials = booking.barberName.split(' ').slice(0, 2).map((n) => n[0]).join('');
-
   return (
-    <View
+    <Pressable
+      onPress={onPress}
       style={{
-        backgroundColor: T.card, borderRadius: 18, borderWidth: HAIRLINE, borderColor: T.border,
-        padding: 16, marginBottom: 12,
+        flexDirection: 'row',
+        backgroundColor: T.card,
+        borderRadius: 10,
+        borderWidth: HAIRLINE,
+        borderColor: T.border,
+        marginBottom: 14,
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.17,
+        shadowRadius: 8,
+        elevation: 4,
       }}
+      android_ripple={{ color: T.input }}
     >
-      {/* Status + service type */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <View style={{ backgroundColor: tone.bg, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 }}>
-          <Text style={{ fontSize: 12, fontWeight: '700', color: tone.fg }}>{badge.label}</Text>
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: T.input, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 }}>
-          {isMobileJob ? <Car size={12} color={T.textMuted} /> : <Store size={12} color={T.textMuted} />}
-          <Text style={{ fontSize: 12, fontWeight: '600', color: T.textMuted }}>
-            {isMobileJob ? 'Mobile' : 'In-shop'}
-          </Text>
-        </View>
-      </View>
-
-      {/* Barber */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        {booking.barberAvatarUrl ? (
-          <Image source={{ uri: booking.barberAvatarUrl }} style={{ width: 44, height: 44, borderRadius: 22 }} />
-        ) : (
-          <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: T.accentWash, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ color: T.accent, fontSize: 15, fontWeight: '800' }}>{initials}</Text>
+      {/* Left: what and with whom */}
+      <View style={{ flex: 1, padding: 14, paddingRight: 14 }}>
+        <View style={{ flexDirection: 'row' }}>
+          <View style={{ backgroundColor: tone.bg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 }}>
+            <Text style={{ fontSize: 10, fontWeight: '500', color: tone.fg }}>{badge.label}</Text>
           </View>
+        </View>
+
+        <Text
+          style={{ fontSize: 14, fontWeight: '600', color: T.text, marginTop: 10, letterSpacing: -0.2 }}
+          numberOfLines={1}
+        >
+          {booking.serviceName}
+        </Text>
+        <Text style={{ fontSize: 14, color: T.textFaint, marginTop: 2 }} numberOfLines={1}>
+          with {booking.barberName.split(' ')[0]}
+        </Text>
+
+        {/* Where it happens: the shop, or the address a mobile barber comes to */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 10 }}>
+          {booking.barberAvatarUrl ? (
+            <Image
+              source={{ uri: booking.barberAvatarUrl }}
+              style={{ width: 30, height: 30, borderRadius: 15 }}
+            />
+          ) : (
+            <View style={{ width: 30, height: 30, borderRadius: 15, borderWidth: HAIRLINE, borderColor: T.border, alignItems: 'center', justifyContent: 'center' }}>
+              <UserRound size={16} color={T.textDisabled} strokeWidth={1.8} />
+            </View>
+          )}
+          <Text style={{ flex: 1, fontSize: 14, fontWeight: '600', color: T.text }} numberOfLines={1}>
+            {isMobileJob ? booking.clientLocation!.address : booking.shopName}
+          </Text>
+          {isMobileJob
+            ? <Car size={14} color={T.textDisabled} />
+            : <Store size={14} color={T.textDisabled} />}
+        </View>
+      </View>
+
+      {/* Right rail: the date, readable from across the room */}
+      <View
+        style={{
+          width: 104,
+          borderLeftWidth: HAIRLINE,
+          borderLeftColor: T.border,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingVertical: 18,
+        }}
+      >
+        <Text style={{ fontSize: 13, fontWeight: '500', color: T.textMuted }}>
+          {MONTHS[month - 1]}
+        </Text>
+        <Text style={{ fontSize: 26, fontWeight: '600', color: T.text, lineHeight: 38, letterSpacing: -0.5 }}>
+          {day}
+        </Text>
+        <Text style={{ fontSize: 13, fontWeight: '500', color: T.textMuted, marginTop: 2 }}>
+          {fmt12(time)}
+        </Text>
+        {/* The year only earns its place when it isn't the obvious one. */}
+        {year !== new Date().getFullYear() && (
+          <Text style={{ fontSize: 11.5, color: T.textDisabled, marginTop: 2 }}>{year}</Text>
         )}
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 16, fontWeight: '700', color: T.text }} numberOfLines={1}>
-            {booking.serviceName}
-          </Text>
-          <Text style={{ fontSize: 13, color: T.textFaint, marginTop: 2 }} numberOfLines={1}>
-            {booking.barberName}
-            {booking.shopName && booking.shopName !== booking.barberName ? ` · ${booking.shopName}` : ''}
-          </Text>
-        </View>
-        <Text style={{ fontSize: 16, fontWeight: '800', color: T.text }}>
-          GH₵{booking.total.toFixed(2)}
-        </Text>
       </View>
-
-      {/* When */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 14 }}>
-        <Clock size={14} color={T.textFaint} />
-        <Text style={{ fontSize: 13.5, color: T.textMuted }}>
-          {fmtDateLong(date)} · {fmt12(time)}
-        </Text>
-      </View>
-
-      {/* Where a mobile barber is coming to */}
-      {booking.clientLocation && (
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 7 }}>
-          <MapPin size={14} color={T.textFaint} style={{ marginTop: 2 }} />
-          <Text style={{ flex: 1, fontSize: 13, color: T.textFaint, lineHeight: 19 }} numberOfLines={2}>
-            {booking.clientLocation.address}
-          </Text>
-        </View>
-      )}
-
-      {/* Why it was called off */}
-      {booking.cancelReason && (
-        <Text style={{ fontSize: 12.5, color: T.textFaint, marginTop: 10, fontStyle: 'italic' }}>
-          {booking.cancelReason}
-        </Text>
-      )}
-
-      {/* Actions */}
-      {(canPay || canCancel) && (
-        <View style={{ flexDirection: 'row', gap: 10, marginTop: 16, paddingTop: 14, borderTopWidth: HAIRLINE, borderTopColor: T.border }}>
-          {canCancel && (
-            <Pressable
-              onPress={onCancel}
-              style={{ flex: canPay ? 0 : 1, paddingHorizontal: 18, paddingVertical: 12, borderRadius: 12, borderWidth: HAIRLINE, borderColor: T.border, alignItems: 'center' }}
-            >
-              <Text style={{ fontSize: 14, fontWeight: '600', color: T.textMuted }}>Cancel</Text>
-            </Pressable>
-          )}
-          {canPay && (
-            <Pressable
-              onPress={() => {
-                tapMedium();
-                router.push({
-                  pathname: '/(client)/booking/payment',
-                  params: { bookingId: booking.id },
-                } as never);
-              }}
-              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 12, backgroundColor: T.accent }}
-            >
-              <Text style={{ fontSize: 14, fontWeight: '700', color: T.onAccent }}>
-                Pay GH₵{booking.total.toFixed(2)}
-              </Text>
-              <ChevronRight size={16} color={T.onAccent} />
-            </Pressable>
-          )}
-        </View>
-      )}
-    </View>
+    </Pressable>
   );
 }

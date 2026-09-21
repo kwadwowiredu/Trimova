@@ -152,7 +152,7 @@ export default function LocationPickerScreen() {
     <View style={styles.container}>
       {/* Map (fills entire screen behind everything) */}
       <MapView
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         region={region}
         onRegionChangeComplete={handleRegionChangeComplete}
         showsUserLocation

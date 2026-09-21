@@ -20,7 +20,7 @@ import Animated, {
 import { Swipeable } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  Bell,
+
   CalendarX,
   XCircle,
   CheckSquare,
@@ -28,7 +28,9 @@ import {
   CheckCircle2,
 } from 'lucide-react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { NotificationBell } from '@/components/ui/NotificationBell';
 import { BookingCard, type Booking } from '@/components/barber/BookingCard';
+import { AppointmentSheet } from '@/components/barber/AppointmentSheet';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { ListSkeleton } from '@/components/ui/Skeleton';
 import { CompleteProfileBanner, isProfileIncomplete } from '@/components/barber/CompleteProfileBanner';
@@ -53,6 +55,8 @@ function toCardBooking(b: ApiBooking): Booking {
     endTime: b.endsAt,
     // In-shop jobs happen at the shop, so only mobile jobs carry an address.
     locationAddress: b.clientLocation?.address ?? '',
+    requiresApproval: b.requiresApproval,
+    approvedAt: b.approvedAt,
   };
 }
 
@@ -208,6 +212,7 @@ interface SwipeCardItemProps {
   /** Present only for freelance barbers — enables the Accept/Decline request flow. */
   onAcceptPress?: (id: string) => void;
   onDeclinePress?: (id: string) => void;
+  onOpenPress: (id: string) => void;
 }
 
 function SwipeCardItem({
@@ -220,6 +225,7 @@ function SwipeCardItem({
   onCancelPress,
   onAcceptPress,
   onDeclinePress,
+  onOpenPress,
 }: SwipeCardItemProps) {
   const swipeRef = useRef<Swipeable>(null);
   const isUpcoming = tab === 'Upcoming';
@@ -238,6 +244,7 @@ function SwipeCardItem({
       onPress={onToggleSelect}
       onAccept={onAcceptPress}
       onDecline={onAcceptPress ? onDeclinePress : undefined}
+      onOpen={onOpenPress}
     />
   );
 
@@ -369,12 +376,31 @@ export default function BarberBookingsScreen() {
   const [isSelectionMode, setIsSelection] = useState(false);
   const [modalConfig, setModalConfig]     = useState<ModalConfig | null>(null);
   const [acceptToast, setAcceptToast]     = useState('');
+  const [openBookingId, setOpenBookingId] = useState<string | null>(null);
 
   // Everything a client books at this shop lands here.
-  const { data, isLoading: loading, isRefetching, refetch } = useQuery({
+  //
+  // Polled rather than pulled: a barber shouldn't have to think about
+  // refreshing to find out someone just booked them. Fifteen seconds is short
+  // enough to feel immediate and long enough to be cheap.
+  const { data, isLoading: loading, refetch } = useQuery({
     queryKey: ['bookings', 'barber'],
     queryFn: () => bookingsService.getBarberBookings({ page: 1 }),
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   });
+
+  // Pull-to-refresh keeps its own flag — driving RefreshControl from the
+  // query's isRefetching makes the spinner reappear on every poll.
+  const [pulling, setPulling] = useState(false);
+  async function pullToRefresh() {
+    setPulling(true);
+    try {
+      await refetch();
+    } finally {
+      setPulling(false);
+    }
+  }
 
   const apiBookings = useMemo(() => data?.data.data ?? [], [data]);
   const bookings = useMemo(() => apiBookings.map(toCardBooking), [apiBookings]);
@@ -383,16 +409,13 @@ export default function BarberBookingsScreen() {
     queryClient.invalidateQueries({ queryKey: ['bookings'] });
   }
 
-  // Freelance request flow: accepting lets the client go ahead and pay.
-  async function handleAccept(id: string) {
-    try {
-      await bookingsService.confirm(id);
-      refresh();
-      setAcceptToast('Request accepted — client notified to make payment');
-      setTimeout(() => setAcceptToast(''), 2800);
-    } catch (err) {
-      Alert.alert('Not accepted', getApiErrorMessage(err));
-    }
+  /**
+   * A freelance barber has a travel fee to set and an address to look at
+   * before they agree to anything, so "accept" opens the detail sheet rather
+   * than confirming blind.
+   */
+  function handleAccept(id: string) {
+    setOpenBookingId(id);
   }
 
   // ── Animated values ──────────────────────────────────────────────────────────
@@ -549,12 +572,11 @@ export default function BarberBookingsScreen() {
           <Text style={{ fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.7)' }} numberOfLines={1}>
             {barber?.businessName ?? 'My Barbershop'}
           </Text>
-          <Pressable className="relative p-1">
-            <Bell size={22} color="rgba(255,255,255,0.9)" />
-            {upcomingCount > 0 && (
-              <View className="absolute top-1 right-1 w-2 h-2 rounded-full bg-danger border-2 border-white" />
-            )}
-          </Pressable>
+          <NotificationBell
+            route="/(barber)/notifications"
+            color="rgba(255,255,255,0.9)"
+            badgeBorderColor="#2D27A8"
+          />
         </View>
 
         {/* Page title */}
@@ -610,7 +632,7 @@ export default function BarberBookingsScreen() {
                 showsVerticalScrollIndicator={false}
                 ListEmptyComponent={<EmptyState tab={tab} />}
                 refreshControl={
-                  <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor="#3c3cb9" />
+                  <RefreshControl refreshing={pulling} onRefresh={pullToRefresh} tintColor="#3c3cb9" />
                 }
                 renderItem={({ item }) => (
                   <SwipeCardItem
@@ -623,6 +645,7 @@ export default function BarberBookingsScreen() {
                     onCancelPress={handleSwipeCancel}
                     onAcceptPress={isFreelance ? handleAccept : undefined}
                     onDeclinePress={handleDecline}
+                    onOpenPress={setOpenBookingId}
                   />
                 )}
               />
@@ -642,6 +665,13 @@ export default function BarberBookingsScreen() {
           onAction={handleBatchAction}
         />
       )}
+
+      {/* ── Full appointment detail + every action ─────────────── */}
+      <AppointmentSheet
+        bookingId={openBookingId}
+        onClose={() => setOpenBookingId(null)}
+        barber={barber}
+      />
 
       {/* ── Confirmation modal ─────────────────────────────────── */}
       {modalContent && (

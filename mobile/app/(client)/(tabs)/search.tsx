@@ -91,7 +91,7 @@ export default function ClientSearchScreen() {
       {/* ── Map (full screen behind everything) ─────────────── */}
       <MapView
         ref={mapRef}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         initialRegion={initialRegion}
         showsUserLocation
         showsMyLocationButton={false}
@@ -139,7 +139,7 @@ export default function ClientSearchScreen() {
           <Pressable onPress={openResults} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 }}>
             <Search size={20} color="#161c27" />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 15, fontWeight: '700', color: '#161c27' }}>Barbers & styles</Text>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: '#161c27' }}>Barbers & styles</Text>
               <Text style={{ fontSize: 12, color: '#8a89a3', marginTop: 1 }} numberOfLines={1}>
                 {coordinates ? 'Map area · near you' : 'Map area · Accra'}
               </Text>

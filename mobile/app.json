@@ -57,7 +57,10 @@
         }
       ],
       "expo-web-browser",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "expo-image",
+      "expo-status-bar",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true

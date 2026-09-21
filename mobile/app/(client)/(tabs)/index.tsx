@@ -14,7 +14,8 @@ import {
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Bell, MapPin, Search, AlertCircle, Star, Navigation, History } from 'lucide-react-native';
+import { MapPin, Search, AlertCircle, Star, Navigation, History } from 'lucide-react-native';
+import { NotificationBell } from '@/components/ui/NotificationBell';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
 import { useLocationStore } from '@/stores/locationStore';
@@ -26,6 +27,7 @@ import { BarberBannerCard } from '@/components/barber/BarberBannerCard';
 import { PullLoader } from '@/components/ui/PullLoader';
 import { T, HAIRLINE, cardSurface } from '@/constants/clientTheme';
 import { StarIcon } from '@/components/ui/Icons';
+import { tapLight } from '@/utils/haptics';
 import type { BarberListItem } from '@/types/user';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -33,6 +35,9 @@ const APP_LOGO = require('../../../assets/app logo.png');
 // Navy (#14213d) wave icon derived from assets/handwave.jpg.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const HANDWAVE = require('../../../assets/handwave.jpg');
+
+/** How far "nearby" reaches. Kept in step with the radius we search on. */
+const NEARBY_RADIUS_KM = 10;
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -104,7 +109,12 @@ function PeekCarousel({
 
 export default function HomeScreen() {
   // Request location permission on first entry ("allow Trimova to use your location?")
-  useLocation();
+  const {
+    canAskAgain,
+    checking: checkingLocation,
+    request: requestLocation,
+    openSettings: openLocationSettings,
+  } = useLocation();
 
   const { user } = useAuthStore();
   const { coordinates } = useLocationStore();
@@ -123,7 +133,7 @@ export default function HomeScreen() {
       barbersService.search({
         lat: coordinates?.lat,
         lng: coordinates?.lng,
-        radius: 10,
+        radius: NEARBY_RADIUS_KM,
         page: 1,
         limit: 20,
       }),
@@ -142,8 +152,21 @@ export default function HomeScreen() {
 
   // Recommended = top-rated barbers (later: also barbers running discounts).
   const recommended = [...barbers].sort((a, b) => b.rating - a.rating).slice(0, 8);
-  // Nearby = server order (sorted by distance when coordinates are present).
-  const nearby = coordinates ? barbers.slice(0, 8) : [];
+
+  /**
+   * Nearby = barbers we can actually measure and that fall inside the radius.
+   *
+   * The search RPC lets a barber through the distance filter when they haven't
+   * set a location yet — right for general search (a new shop shouldn't be
+   * invisible) but wrong here, where "nearby" is the whole promise. So anyone
+   * without a real distance is left out rather than presented as close by.
+   */
+  const nearby = coordinates
+    ? barbers
+        .filter((b) => typeof b.distance === 'number' && b.distance <= NEARBY_RADIUS_KM)
+        .sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity))
+        .slice(0, 8)
+    : [];
 
   return (
     <View style={{ flex: 1, backgroundColor: T.canvas }}>
@@ -170,31 +193,42 @@ export default function HomeScreen() {
 
         {/* ── Header — sits quietly on the canvas, no colour wash ── */}
         <View style={{ paddingTop: insets.top + 8, paddingBottom: 4, backgroundColor: T.canvas }}>
-          {/* Brand row: centered logo + app name, bell pinned right */}
-          <View style={{ height: 44, justifyContent: 'center' }}>
-            <View className="flex-row items-center justify-center gap-2">
+          {/* Brand row: logo + app name on the left, bell on the right */}
+          <View
+            style={{
+              height: 44,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingHorizontal: 16,
+            }}
+          >
+            <View className="flex-row items-center gap-2">
               <Image source={APP_LOGO} style={{ width: 28, height: 34 }} resizeMode="contain" />
-              <Text style={{ fontSize: 20, fontWeight: '800', color: T.text, letterSpacing: -0.3 }}>Trimova</Text>
+              <Text style={{ fontSize: 20, fontWeight: '700', color: T.text, letterSpacing: -0.3 }}>Trimova</Text>
             </View>
-            <Pressable
-              onPress={() => router.push('/(client)/notifications' as never)}
-              className="active:opacity-70"
+            <View
               style={{
-                position: 'absolute', right: 16,
                 width: 40, height: 40, borderRadius: 20,
                 backgroundColor: T.card, borderWidth: HAIRLINE, borderColor: T.border,
                 alignItems: 'center', justifyContent: 'center',
               }}
             >
-              <Bell size={19} color={T.text} />
-            </Pressable>
+              <NotificationBell
+                route="/(client)/notifications"
+                color={T.text}
+                size={19}
+                badgeBorderColor={T.card}
+              />
+            </View>
           </View>
 
           {/* Welcome message — one line, with the brand wave icon */}
           <View className="flex-row items-center px-4 pt-3 pb-1 gap-2">
-            <Text style={{ fontSize: 24, fontWeight: '700', color: T.text, flexShrink: 1 }} numberOfLines={1}>
-              {getGreeting()}, {firstName}
+            <Text style={{ fontSize: 20, fontWeight: '700', color: '#e09f3e', flexShrink: 1 }} numberOfLines={1}>
+              {getGreeting()}, 
             </Text>
+            <Text style={{ fontSize: 22, fontWeight: '600', color: T.text }}> {firstName}</Text>
             <Image source={HANDWAVE} style={{ width: 32, height: 32 }} resizeMode="contain" />
           </View>
 
@@ -202,7 +236,7 @@ export default function HomeScreen() {
           <Pressable
             onPress={() => router.push('/(client)/(tabs)/search' as never)}
             className="mx-4 mt-4 mb-4 flex-row items-center rounded-2xl px-4 py-4 gap-3 active:opacity-80"
-            style={{ backgroundColor: T.input, borderWidth: HAIRLINE, borderColor: T.border }}
+            style={{ backgroundColor: '#fffffc', borderWidth: HAIRLINE, borderColor: T.border, borderRadius: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.17, shadowRadius: 8, elevation: 4 }}
           >
             <Search size={18} color={T.textFaint} />
             <Text style={{ flex: 1, fontSize: 14.5, color: T.textFaint }}>Find your barber…</Text>
@@ -240,11 +274,11 @@ export default function HomeScreen() {
         <View className="mb-7 mt-2">
           <View className="flex-row items-center justify-between px-4 mb-3">
             <View className="flex-row items-center gap-1.5">
-              <StarIcon size={15} />
-              <Text style={{ fontSize: 17.5, fontWeight: '700', color: T.text }}>Recommended</Text>
+              <StarIcon size={24} />
+              <Text style={{ fontSize: 15, fontWeight: '700', color: '#023047' }}>Recommended</Text>
             </View>
             <Pressable onPress={() => router.push('/(client)/(tabs)/search' as never)}>
-              <Text style={{ fontSize: 13.5, color: T.accent, fontWeight: '600' }}>See all</Text>
+              <Text style={{ fontSize: 13, color: T.accent, fontWeight: '600' }}>See all</Text>
             </Pressable>
           </View>
           <PeekCarousel
@@ -259,11 +293,11 @@ export default function HomeScreen() {
         <View className="mb-4">
           <View className="flex-row items-center justify-between px-4 mb-3">
             <View className="flex-row items-center gap-1.5">
-              <Navigation size={14} color={T.textFaint} />
-              <Text style={{ fontSize: 17.5, fontWeight: '700', color: T.text }}>Nearby</Text>
+              <Navigation size={16} color={T.textFaint} />
+              <Text style={{ fontSize: 15, fontWeight: '700', color: '#023047' }}>Nearby</Text>
             </View>
             <Pressable onPress={() => router.push('/(client)/(tabs)/search' as never)}>
-              <Text style={{ fontSize: 13.5, color: T.accent, fontWeight: '600' }}>See all</Text>
+              <Text style={{ fontSize: 13, color: T.accent, fontWeight: '600' }}>See all</Text>
             </Pressable>
           </View>
           {coordinates ? (
@@ -273,15 +307,39 @@ export default function HomeScreen() {
               emptyText="No barbers near you yet — try widening your search."
               cardW={CARD_W}
             />
-          ) : (
-            <View className="mx-4" style={{ ...cardSurface, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          ) : checkingLocation ? null : (
+            /*
+              The OS dialog fires on first launch. If we're still here, the
+              client either hasn't answered it or has already said no — and
+              once they've said no, only Settings can change it. So the button
+              does whichever of those two things will actually work.
+            */
+            <Pressable
+              onPress={() => {
+                tapLight();
+                if (canAskAgain) requestLocation();
+                else openLocationSettings();
+              }}
+              className="mx-4"
+              style={{ ...cardSurface, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 12 }}
+            >
               <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: T.accentWash, alignItems: 'center', justifyContent: 'center' }}>
                 <MapPin size={18} color={T.accent} />
               </View>
-              <Text style={{ flex: 1, fontSize: 13, color: T.textMuted, lineHeight: 19 }}>
-                Allow location access so we can show barbershops and mobile barbers close to you.
-              </Text>
-            </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: T.text }}>
+                  {canAskAgain ? 'Find barbers near you' : 'Location is switched off'}
+                </Text>
+                <Text style={{ fontSize: 13, color: T.textMuted, lineHeight: 19, marginTop: 2 }}>
+                  {canAskAgain
+                    ? 'Turn on location so we can show barbershops and mobile barbers close to you.'
+                    : 'Turn it on for Trimova in your phone settings to see barbers nearby.'}
+                </Text>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: T.accent, marginTop: 8 }}>
+                  {canAskAgain ? 'Turn on location' : 'Open settings'}
+                </Text>
+              </View>
+            </Pressable>
           )}
         </View>
 
@@ -289,8 +347,8 @@ export default function HomeScreen() {
         {recentlyViewed.length > 0 && (
           <View className="mb-4">
             <View className="flex-row items-center gap-1.5 px-4 mb-3">
-              <History size={14} color={T.textFaint} />
-              <Text style={{ fontSize: 17.5, fontWeight: '700', color: T.text }}>Recently Viewed</Text>
+              <History size={16} color={T.textFaint} />
+              <Text style={{ fontSize: 15, fontWeight: '700', color: '#023047' }}>Recently Viewed</Text>
             </View>
             <PeekCarousel
               data={recentlyViewed}

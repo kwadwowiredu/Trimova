@@ -3,6 +3,7 @@ import type { ApiResponse, PaginatedResponse } from '@/types/api';
 import type {
   Booking,
   BookingStatus,
+  CancellationOutcome,
   CreateBookingPayload,
   DayAvailability,
   MonthAvailability,
@@ -62,6 +63,31 @@ export const bookingsService = {
 
   cancel: (id: string, reason?: string) =>
     api.patch<ApiResponse<Booking>>(`/bookings/${id}/cancel`, { reason }),
+
+  /**
+   * What cancelling or moving this booking costs right now, so the app can
+   * show the real figure instead of a generic warning.
+   */
+  getPolicy: (id: string) =>
+    api.get<ApiResponse<CancellationOutcome>>(`/bookings/${id}/policy`),
+
+  /** Move an appointment. The cancellation policy applies to late changes. */
+  reschedule: (id: string, scheduledAt: string) =>
+    api.patch<ApiResponse<Booking>>(`/bookings/${id}/reschedule`, { scheduledAt }),
+
+  /**
+   * The client confirms the service happened, releasing the money to the
+   * barber straight away instead of waiting out the confirmation window.
+   */
+  confirmService: (id: string) =>
+    api.patch<ApiResponse<Booking>>(`/bookings/${id}/confirm-service`),
+
+  /**
+   * The client reports it did NOT happen. Freezes the payment for support to
+   * look at — nothing is released automatically after this.
+   */
+  dispute: (id: string, reason?: string) =>
+    api.patch<ApiResponse<Booking>>(`/bookings/${id}/dispute`, { reason }),
 
   start: (id: string) => api.patch<ApiResponse<Booking>>(`/bookings/${id}/start`),
 

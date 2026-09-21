@@ -13,10 +13,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { UserPlus, Star, X, Bell, Ticket, Mail, Trash2 } from 'lucide-react-native';
+import { UserPlus, Star, X, Ticket, Mail, Trash2 } from 'lucide-react-native';
+import { NotificationBell } from '@/components/ui/NotificationBell';
 import { ActivityIndicator, Alert } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { staffService, type StaffInvite } from '@/services/staff';
+import { staffService, type StaffInvite, type StaffMember } from '@/services/staff';
 import { getApiErrorMessage } from '@/services/api';
 import { Input } from '@/components/ui/Input';
 import { CardSkeleton, Skeleton } from '@/components/ui/Skeleton';
@@ -26,31 +27,9 @@ import { authService } from '@/services/auth';
 import { useThemeColors, type ThemeColors } from '@/hooks/useThemeColors';
 import type { BarberProfile } from '@/types/user';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export interface StaffMember {
-  id: string;
-  name: string;
-  role: string;
-  rating: number;
-  avatarUrl: string | null;
-  isActive: boolean;
-  totalAppointments: number;
-  revenueThisMonth: number; // GHS
-  phoneNumber: string;
-  email: string;
-  joinedDate: string; // ISO
-  assignedServices: string[];
-}
-
-// ─── Mock data (replace with useQuery / API) ──────────────────────────────────
-
-export const MOCK_STAFF: StaffMember[] = [
-  { id: '1', name: 'Kwame Mensah', role: 'Master Barber', rating: 4.9, avatarUrl: null, isActive: true,  totalAppointments: 48, revenueThisMonth: 1200, phoneNumber: '+233 24 123 4567', email: 'kwame.mensah@example.com', joinedDate: '2025-01-15', assignedServices: ['Executive Fade', 'Haircut & Beard', 'Skin Fade'] },
-  { id: '2', name: 'Kofi Asare',   role: 'Staff Barber',  rating: 4.7, avatarUrl: null, isActive: false, totalAppointments: 32, revenueThisMonth: 800,  phoneNumber: '+233 20 987 6543', email: 'kofi.asare@example.com',  joinedDate: '2025-03-10', assignedServices: ['Haircut & Beard', 'Beard Trim'] },
-  { id: '3', name: 'Ama Boateng',  role: 'Staff Barber',  rating: 4.5, avatarUrl: null, isActive: true,  totalAppointments: 21, revenueThisMonth: 520,  phoneNumber: '+233 55 456 7890', email: 'ama.boateng@example.com', joinedDate: '2025-05-22', assignedServices: ['Beard Trim', 'Shampoo & Style'] },
-  { id: '4', name: 'Yaw Darko',    role: 'Staff Barber',  rating: 4.3, avatarUrl: null, isActive: true,  totalAppointments: 14, revenueThisMonth: 340,  phoneNumber: '+233 27 321 0987', email: 'yaw.darko@example.com',  joinedDate: '2026-02-01', assignedServices: ['Haircut & Beard'] },
-];
+// The roster comes from /staff/roster — see services/staff.ts. Every figure on
+// it (completed appointments, revenue this month) is derived from real
+// bookings rather than stored, so it can never drift out of date.
 
 // ─── Square avatar ────────────────────────────────────────────────────────────
 
@@ -329,12 +308,20 @@ export default function BarberStaffScreen() {
   // Freelance/mobile barbers have no shop team; everyone else is a shop owner.
   const isFreelance = barber?.barberType === 'mobile';
 
-  const [staff, setStaff]            = useState<StaffMember[]>(MOCK_STAFF);
-  const [loading, setLoading]        = useState(true);
   const [showAddModal, setShowModal] = useState(false);
+  // Which invite is mid-resend, so its button can show progress.
+  const [resendingId, setResendingId] = useState<string | null>(null);
 
   // Real staff invitations sent by this shop.
   const queryClient = useQueryClient();
+
+  // The shop's actual team. Freelancers have none, so don't ask.
+  const { data: rosterRes, isLoading: loading } = useQuery({
+    queryKey: ['staff', 'roster'],
+    queryFn: () => staffService.getRoster(),
+    enabled: !isFreelance,
+  });
+  const staff = rosterRes?.data.data ?? [];
   const { data: inviteRes } = useQuery({
     queryKey: ['staff', 'invites'],
     queryFn: () => staffService.listInvites(),
@@ -357,6 +344,8 @@ export default function BarberStaffScreen() {
   }
 
   async function resend(invite: StaffInvite) {
+    if (resendingId) return;
+    setResendingId(invite.id);
     try {
       const res = await staffService.resendInvite(invite.id);
       refreshInvites();
@@ -368,6 +357,8 @@ export default function BarberStaffScreen() {
       );
     } catch (e) {
       Alert.alert('Failed', getApiErrorMessage(e) || "Couldn't resend the invitation.");
+    } finally {
+      setResendingId(null);
     }
   }
 
@@ -413,17 +404,20 @@ export default function BarberStaffScreen() {
     }
   }
 
-  // TODO: replace with the real staff fetch once the staff endpoint exists.
-  useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 450);
-    return () => clearTimeout(t);
-  }, []);
-
   const totalStaff = staff.length;
   const onDuty     = staff.filter((m) => m.isActive).length;
 
+  /**
+   * A staff member's availability is theirs to set from their own app — an
+   * owner toggling it here would be writing to someone else's profile, so the
+   * switch is read-only until there's an endpoint that models that properly.
+   */
   function handleToggle(id: string, value: boolean) {
-    setStaff((prev) => prev.map((m) => (m.id === id ? { ...m, isActive: value } : m)));
+    const member = staff.find((m) => m.id === id);
+    Alert.alert(
+      'Set by the barber',
+      `${member?.name ?? 'This barber'} controls their own availability from their app. Ask them to mark themselves ${value ? 'available' : 'away'}.`,
+    );
   }
 
   function handleManage(id: string) {
@@ -450,10 +444,11 @@ export default function BarberStaffScreen() {
             <Text style={{ fontSize: 16, fontWeight: '600', color: '#ffffff' }}>Staff Management</Text>
             <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', marginTop: 2 }}>Manage your team and track performance.</Text>
           </View>
-          <Pressable className="relative p-1" hitSlop={10}>
-            <Bell size={22} color="rgba(255,255,255,0.9)" />
-            <View className="absolute top-1 right-1 w-2 h-2 rounded-full bg-danger border-2 border-white" />
-          </Pressable>
+          <NotificationBell
+            route="/(barber)/notifications"
+            color="rgba(255,255,255,0.9)"
+            badgeBorderColor="#2D27A8"
+          />
         </View>
       </View>
 
@@ -514,8 +509,23 @@ export default function BarberStaffScreen() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surfaceAlt, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 11, marginTop: 12 }}>
                     <Mail size={14} color={c.textFaint} />
                     <Text style={{ flex: 1, fontSize: 12.5, color: c.textMuted }}>Invitation email sent</Text>
-                    <Pressable onPress={() => resend(inv)} hitSlop={8}>
-                      <Text style={{ fontSize: 12.5, fontWeight: '700', color: c.accent }}>Resend</Text>
+                    {/*
+                      Sending an email takes a second or two. Without a pressed
+                      state the button looks dead until a modal appears out of
+                      nowhere, so it says what it's doing while it does it.
+                    */}
+                    <Pressable
+                      onPress={() => resend(inv)}
+                      disabled={resendingId === inv.id}
+                      hitSlop={8}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, opacity: resendingId === inv.id ? 0.7 : 1 }}
+                    >
+                      {resendingId === inv.id && (
+                        <ActivityIndicator size="small" color={c.accent} />
+                      )}
+                      <Text style={{ fontSize: 12.5, fontWeight: '700', color: c.accent }}>
+                        {resendingId === inv.id ? 'Sending…' : 'Resend'}
+                      </Text>
                     </Pressable>
                   </View>
                 </View>

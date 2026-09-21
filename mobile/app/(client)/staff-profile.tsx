@@ -12,7 +12,7 @@ import {
 } from 'lucide-react-native';
 import { T, HAIRLINE } from '@/constants/clientTheme';
 import { barbersService } from '@/services/barbers';
-import { MOCK_SHOP_STAFF, MOCK_SHOP_REVIEWS, type StaffService } from '@/utils/mockShopData';
+import { reviewsService } from '@/services/reviews';
 import { ReviewRow } from '@/components/barber/ReviewRow';
 import { tapLight, tapSelect, tapMedium } from '@/utils/haptics';
 
@@ -51,7 +51,7 @@ interface StaffProfileData {
   appointmentsCompleted: number;
   phone: string;
   email: string;
-  services: StaffService[];
+  services: { name: string; price: number; durationMinutes: number }[];
   portfolio: string[];
   heroUri: string | null;
   isOwner: boolean;
@@ -73,7 +73,7 @@ export default function ClientStaffProfileScreen() {
   const isOwner = staffId === 'owner';
   const HERO_H = Math.round(width * 0.92);
 
-  // The owner is real data; other staff are mock until the staff API exists.
+  // The owner comes from the barber profile; staff come from the shop roster.
   const { data } = useQuery({
     queryKey: ['barber', barberId],
     queryFn: () => barbersService.getById(barberId!),
@@ -85,7 +85,21 @@ export default function ClientStaffProfileScreen() {
     services?: { id: string; name: string; price: number; durationMinutes: number }[];
   } | undefined;
 
-  const mockStaff = MOCK_SHOP_STAFF.find((s) => s.id === staffId);
+  // A staff member's own record, pulled from the shop's real roster.
+  const { data: staffRes } = useQuery({
+    queryKey: ['shop-staff', barberId],
+    queryFn: () => reviewsService.getShopStaff(barberId!),
+    enabled: !isOwner && !!barberId,
+  });
+  const staffMember = (staffRes?.data.data ?? []).find((s) => s.id === staffId);
+
+  // Reviews follow the barber who earned them, not the shop.
+  const { data: reviewsRes } = useQuery({
+    queryKey: ['reviews', barberId, staffId],
+    queryFn: () => reviewsService.getBarberReviews(barberId!, isOwner ? undefined : staffId),
+    enabled: !!barberId,
+  });
+  const reviews = reviewsRes?.data.data ?? [];
 
   const profile: StaffProfileData | null = isOwner
     ? owner
@@ -103,23 +117,26 @@ export default function ClientStaffProfileScreen() {
           isOwner: true,
         }
       : null // still loading
-    : mockStaff
+    : staffMember
       ? {
-          name: mockStaff.name,
-          role: mockStaff.role,
-          rating: mockStaff.rating,
-          reviewCount: mockStaff.reviewCount,
-          appointmentsCompleted: mockStaff.appointmentsCompleted,
-          phone: mockStaff.phone,
-          email: mockStaff.email,
-          services: mockStaff.services,
-          portfolio: mockStaff.portfolio,
-          heroUri: null,
+          name: staffMember.name,
+          role: staffMember.role,
+          rating: staffMember.rating,
+          reviewCount: staffMember.reviewCount,
+          // A staff barber's completed count comes from the shop's own
+          // bookings view; not exposed publicly, so it stays at zero here.
+          appointmentsCompleted: 0,
+          // Contact details belong to the shop, not to individual staff.
+          phone: '',
+          email: '',
+          // Staff serve the shop's menu; per-barber service lists aren't a
+          // thing yet, so the shop profile is where a client picks a service.
+          services: [],
+          portfolio: [],
+          heroUri: staffMember.avatarUrl,
           isOwner: false,
         }
       : null;
-
-  const reviews = isOwner ? [] : MOCK_SHOP_REVIEWS.filter((r) => r.staffId === staffId);
 
   if (!profile) {
     // Loading (owner fetch) or unknown staff id.

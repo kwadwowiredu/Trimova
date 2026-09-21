@@ -1,11 +1,11 @@
 import { useMemo } from 'react';
-import { View, Text, Pressable, ScrollView, Image } from 'react-native';
+import { View, Text, Pressable, ScrollView, Image, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { Check, ChevronRight, UserRound } from 'lucide-react-native';
 import { barbersService } from '@/services/barbers';
 import { useBookingStore, type BookingProfessional } from '@/stores/bookingStore';
-import { MOCK_SHOP_STAFF } from '@/utils/mockShopData';
+import { reviewsService } from '@/services/reviews';
 import { BookingHeader, ServiceCartBar } from '@/components/booking/BookingHeader';
 import { tapSelect } from '@/utils/haptics';
 import { T, HAIRLINE, chip } from '@/constants/clientTheme';
@@ -33,6 +33,14 @@ export default function BookingProfessionalScreen() {
 
   const isShop = shop?.barberType !== 'mobile';
 
+  // A shop's real roster. Freelancers have no staff, so this only runs for shops.
+  const { data: staffRes, isLoading: loadingStaff } = useQuery({
+    queryKey: ['shop-staff', barberId],
+    queryFn: () => reviewsService.getShopStaff(barberId!),
+    enabled: !!barberId && isShop,
+  });
+  const staff = staffRes?.data.data ?? [];
+
   // Longest working window across the week — a service longer than this can
   // never be completed, which is what drives the "exceeds working hours" note.
   const longestWindow = useMemo(() => {
@@ -57,8 +65,14 @@ export default function BookingProfessionalScreen() {
     });
   }
   if (isShop) {
-    for (const s of MOCK_SHOP_STAFF) {
-      options.push({ id: s.id, name: s.name, role: s.role, rating: s.rating });
+    for (const s of staff) {
+      options.push({
+        id: s.id,
+        name: s.name,
+        role: s.role,
+        avatarUrl: s.avatarUrl,
+        rating: s.rating,
+      });
     }
   }
 
@@ -71,10 +85,14 @@ export default function BookingProfessionalScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20, paddingBottom: 20 }}>
         {/* Layer 1: one white card holding the whole roster */}
+        {loadingStaff && (
+          <View style={{ alignItems: 'center', paddingVertical: 18 }}>
+            <ActivityIndicator color={T.accent} />
+          </View>
+        )}
         <View style={{ backgroundColor: T.card, borderRadius: 18, borderWidth: HAIRLINE, borderColor: T.border, overflow: 'hidden' }}>
           {options.map((p, idx) => {
             const on = professional?.id === p.id;
-            const initials = p.name.split(' ').slice(0, 2).map((n) => n[0]).join('');
             const available = fitsWorkingHours;
 
             return (
@@ -98,8 +116,11 @@ export default function BookingProfessionalScreen() {
                   ) : p.avatarUrl ? (
                     <Image source={{ uri: p.avatarUrl }} style={{ width: 46, height: 46, borderRadius: 23 }} resizeMode="cover" />
                   ) : (
-                    <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: T.accentWash, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ color: T.accent, fontSize: 16, fontWeight: '800' }}>{initials}</Text>
+                    // Most barbers haven't uploaded a photo yet — a default
+                    // avatar reads as "no picture", where initials can look
+                    // like a deliberate design choice.
+                    <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: T.input, alignItems: 'center', justifyContent: 'center' }}>
+                      <UserRound size={22} color={T.textFaint} strokeWidth={1.8} />
                     </View>
                   )}
                   {on && (

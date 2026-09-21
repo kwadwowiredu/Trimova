@@ -15,7 +15,7 @@ export function BookingHeader({ title, subtitle }: { title: string; subtitle?: s
           <ArrowLeft size={24} color={T.text} strokeWidth={2.2} />
         </Pressable>
         <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 23, fontWeight: '800', color: T.text, letterSpacing: -0.3 }} numberOfLines={1}>
+          <Text style={{ fontSize: 20, fontWeight: '600', color: T.text, letterSpacing: -0.3 }} numberOfLines={1}>
             {title}
           </Text>
           {subtitle ? (
@@ -50,7 +50,7 @@ export function BookingFooter({
           borderRadius: 16, paddingVertical: 17, alignItems: 'center',
         }}
       >
-        <Text style={{ color: disabled ? T.textDisabled : T.onAccent, fontSize: 15.5, fontWeight: '700' }}>{label}</Text>
+        <Text style={{ color: disabled ? T.textDisabled : T.onAccent, fontSize: 15.5, fontWeight: '600' }}>{label}</Text>
       </Pressable>
     </View>
   );
@@ -87,13 +87,13 @@ export function ServiceCartBar({
           <ShoppingBag size={18} color={T.accent} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 14.5, fontWeight: '700', color: T.text }} numberOfLines={1}>{serviceName}</Text>
+          <Text style={{ fontSize: 14.5, fontWeight: '600', color: T.text }} numberOfLines={1}>{serviceName}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
             <Clock size={11} color={T.textFaint} />
             <Text style={{ fontSize: 12, color: T.textFaint }}>{durationMinutes} mins</Text>
           </View>
         </View>
-        <Text style={{ fontSize: 16, fontWeight: '800', color: T.text }}>GH₵{price.toFixed(0)}</Text>
+        <Text style={{ fontSize: 16, fontWeight: '600', color: '#52b788' }}>GH₵{price.toFixed(0)}</Text>
       </View>
 
       <Pressable

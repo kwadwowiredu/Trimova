@@ -52,7 +52,7 @@ export function BarberBannerCard({ barber }: { barber: BarberListItem }) {
 
         {/* Frosted rating badge */}
         <BlurView
-          intensity={35}
+          intensity={95}
           tint="light"
           style={{ position: 'absolute', top: 10, right: 10, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.55)' }}
         >
@@ -82,7 +82,7 @@ export function BarberBannerCard({ barber }: { barber: BarberListItem }) {
       {/* ── Info block ───────────────────────────────────────── */}
       <View style={{ paddingHorizontal: 14, paddingTop: 10, paddingBottom: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-          <Text style={{ fontSize: 15.5, fontWeight: '700', color: T.text, flexShrink: 1 }} numberOfLines={1}>
+          <Text style={{ fontSize: 15.5, fontWeight: '600', color: T.text, flexShrink: 1 }} numberOfLines={1}>
             {title}
           </Text>
           {barber.isVerified && <BadgeCheck size={15} color={T.accent} />}
@@ -95,7 +95,7 @@ export function BarberBannerCard({ barber }: { barber: BarberListItem }) {
               {barber.fullName}
             </Text>
             <View style={{ backgroundColor: mobileChip.bg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 }}>
-              <Text style={{ fontSize: 9.5, fontWeight: '700', color: mobileChip.fg }}>MOBILE</Text>
+              <Text style={{ fontSize: 9.5, fontWeight: '600', color: mobileChip.fg }}>MOBILE BARBER</Text>
             </View>
           </View>
         )}

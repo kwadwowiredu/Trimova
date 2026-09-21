@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { getSupabase } from '../utils/supabase';
 import { sendSuccess, sendError } from '../utils/response';
+import { getSettings, splitCommission } from '../utils/settings';
 
 function mapService(row: Record<string, unknown>) {
   return {
@@ -24,6 +25,40 @@ export const servicesController = {
       .order('created_at', { ascending: true });
     if (error) { sendError(res, 'Failed to load services.', 500); return; }
     sendSuccess(res, (data ?? []).map(mapService));
+  },
+
+  /**
+   * GET /services/earnings — what a barber actually takes home.
+   *
+   * A barber setting a price deserves to see the number that reaches their
+   * account, not just the number the client pays. Burying the commission and
+   * letting them discover it on their first payout is how you lose barbers.
+   */
+  async earnings(req: Request, res: Response) {
+    const supabase = getSupabase();
+
+    const [{ data: services, error }, settings] = await Promise.all([
+      supabase
+        .from('services')
+        .select('*')
+        .eq('barber_id', req.user!.sub)
+        .order('created_at', { ascending: true }),
+      getSettings(),
+    ]);
+
+    if (error) { sendError(res, 'Failed to load services.', 500); return; }
+
+    sendSuccess(res, {
+      commissionPercent: settings.commissionPercent,
+      services: (services ?? []).map((row) => {
+        const service = mapService(row);
+        const { commission, barberShare } = splitCommission(
+          service.price,
+          settings.commissionPercent,
+        );
+        return { ...service, commission, youEarn: barberShare };
+      }),
+    });
   },
 
   /** POST /services */

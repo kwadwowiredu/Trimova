@@ -21,7 +21,31 @@ export interface InviteLookup {
   expiresAt: string;
 }
 
+/**
+ * A team member as their shop owner sees them — contact details and this
+ * month's numbers, all derived from real appointments.
+ */
+export interface StaffMember {
+  id: string;
+  name: string;
+  role: string;
+  rating: number;
+  reviewCount: number;
+  avatarUrl: string | null;
+  isActive: boolean;
+  /** Completed appointments, all time. */
+  totalAppointments: number;
+  /** GHS taken this calendar month. */
+  revenueThisMonth: number;
+  phoneNumber: string;
+  email: string;
+  joinedDate: string;
+}
+
 export const staffService = {
+  /** The shop's own team. */
+  getRoster: () => api.get<ApiResponse<StaffMember[]>>('/staff/roster'),
+
   // ── Shop owner ───────────────────────────────────────────────
   invite: (payload: { fullName: string; email: string; phone?: string }) =>
     api.post<ApiResponse<{ invite: StaffInvite; emailSent: boolean; emailSimulated: boolean }>>(

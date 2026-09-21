@@ -1,4 +1,4 @@
-export type UserRole = 'client' | 'barber' | 'staff_barber';
+export type UserRole = 'client' | 'barber' | 'staff_barber' | 'admin';
 export type BarberType = 'barbershop' | 'mobile';
 export type BookingStatus = 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'declined';
 export type PaymentStatus = 'unpaid' | 'paid' | 'refunded';

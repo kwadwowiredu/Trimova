@@ -30,34 +30,18 @@ import {
   X,
 } from 'lucide-react-native';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
-import { MOCK_STAFF, type StaffMember } from '@/app/(barber)/(tabs)/staff';
+import { useQuery } from '@tanstack/react-query';
+import { staffService, type StaffMember } from '@/services/staff';
+import { bookingsService } from '@/services/bookings';
+import { reviewsService, type Review } from '@/services/reviews';
 import { useAuthStore } from '@/stores/authStore';
 import type { BarberProfile } from '@/types/user';
 
-// ─── Mock today's appointments ────────────────────────────────────────────────
-
-const TODAY = new Date();
-
-function makeTodayAppt(
-  h: number,
-  m: number,
-  dur: number,
-  client: string,
-  service: string,
-  status: 'confirmed' | 'pending' | 'completed',
-) {
-  const start = new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), h, m);
-  const end   = new Date(start.getTime() + dur * 60_000);
-  return { client, service, status, start, end };
+/** Local "YYYY-MM-DD" — the API's day filter works in local dates. */
+function todayKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-
-const MOCK_TODAY_APPTS = [
-  makeTodayAppt(10,  0, 45, 'Ama Osei',      'Executive Fade',  'completed'),
-  makeTodayAppt(11, 30, 30, 'Kwesi Poku',     'Beard Trim',      'completed'),
-  makeTodayAppt(13,  0, 45, 'Daniel Nkrumah', 'Haircut & Beard', 'confirmed'),
-  makeTodayAppt(14, 30, 30, 'Fiifi Asante',   'Skin Fade',       'confirmed'),
-  makeTodayAppt(16,  0, 45, 'Yaw Owusu',      'Executive Fade',  'pending'),
-];
 
 const ALL_SERVICES = [
   'Haircut & Beard',
@@ -69,29 +53,6 @@ const ALL_SERVICES = [
   'Kids Haircut',
 ];
 
-const MOCK_REVIEWS = [
-  {
-    id: '1',
-    clientName: 'Ama Osei',
-    rating: 5,
-    comment: 'Excellent fade — very precise and professional.',
-    date: '2026-06-08',
-  },
-  {
-    id: '2',
-    clientName: 'Kwesi Poku',
-    rating: 4,
-    comment: 'Great work. Slightly delayed but worth the wait.',
-    date: '2026-06-05',
-  },
-  {
-    id: '3',
-    clientName: 'Daniel Nkrumah',
-    rating: 5,
-    comment: "Best haircut I've had in a long time. Highly recommend.",
-    date: '2026-06-02',
-  },
-];
 
 const FILTER_PERIODS = ['This Week', 'This Month', 'Last 3 Months', 'All Time'] as const;
 type FilterPeriod = (typeof FILTER_PERIODS)[number];
@@ -153,11 +114,19 @@ function StatCard({
 
 // ─── Overview tab ─────────────────────────────────────────────────────────────
 
-function OverviewTab({ member }: { member: StaffMember }) {
+interface TodayAppt {
+  client: string;
+  service: string;
+  status: string;
+  start: Date;
+  end: Date;
+}
+
+function OverviewTab({ member, appointments }: { member: StaffMember; appointments: TodayAppt[] }) {
   const [period, setPeriod]             = useState<FilterPeriod>('This Month');
   const [showPeriodMenu, setShowMenu]   = useState(false);
 
-  const completedToday = MOCK_TODAY_APPTS.filter((a) => a.status === 'completed').length;
+  const completedToday = appointments.filter((a) => a.status === 'completed').length;
 
   return (
     <ScrollView showsVerticalScrollIndicator={false} className="flex-1">
@@ -237,7 +206,7 @@ function OverviewTab({ member }: { member: StaffMember }) {
           />
           <StatCard
             label="Today"
-            value={`${completedToday}/${MOCK_TODAY_APPTS.length}`}
+            value={`${completedToday}/${appointments.length}`}
             sub="Completed"
             icon={<CheckSquare size={16} color="#3c3cb9" />}
           />
@@ -258,7 +227,7 @@ function OverviewTab({ member }: { member: StaffMember }) {
               elevation:     2,
             }}
           >
-            {MOCK_TODAY_APPTS.map((appt, i) => {
+            {appointments.map((appt, i) => {
               const statusColor: Record<string, string> = {
                 completed: '#38A169',
                 confirmed: '#3c3cb9',
@@ -504,10 +473,17 @@ function PersonalTab({
 
 // ─── Workspace tab ────────────────────────────────────────────────────────────
 
-function WorkspaceTab({ member }: { member: StaffMember }) {
-  const [assignedServices, setAssignedServices] = useState<string[]>(
-    member.assignedServices,
-  );
+function WorkspaceTab({
+  member,
+  reviews,
+}: {
+  member: StaffMember;
+  reviews: Review[];
+}) {
+  // Per-barber service assignment isn't modelled in the database yet: every
+  // barber in a shop offers the shop's menu. Kept as local state so the screen
+  // still works, rather than pretending it saves.
+  const [assignedServices, setAssignedServices] = useState<string[]>([]);
   const [showServicesModal, setShowServicesModal] = useState(false);
   const [draftServices, setDraftServices]         = useState<string[]>([]);
 
@@ -576,7 +552,9 @@ function WorkspaceTab({ member }: { member: StaffMember }) {
           <View>
             <SectionLabel>Recent Reviews</SectionLabel>
             <View className="gap-3">
-              {MOCK_REVIEWS.map((review) => (
+              {reviews.length === 0 ? (
+                <Text className="text-sm text-neutral-400">No reviews yet.</Text>
+              ) : reviews.map((review) => (
                 <View
                   key={review.id}
                   className="bg-white rounded-2xl p-4"
@@ -609,7 +587,7 @@ function WorkspaceTab({ member }: { member: StaffMember }) {
                     {review.comment}
                   </Text>
                   <Text className="text-[11px] text-neutral-400 mt-2">
-                    {new Date(review.date).toLocaleDateString('en-GB', {
+                    {new Date(review.createdAt).toLocaleDateString('en-GB', {
                       day:   'numeric',
                       month: 'short',
                       year:  'numeric',
@@ -744,27 +722,59 @@ export default function StaffDetailScreen() {
   const isOwner = id === 'owner';
   const owner = user as (BarberProfile & { isBookable?: boolean }) | null;
 
+  // The shop's real roster; the owner isn't on it, so they're built below.
+  const { data: rosterRes } = useQuery({
+    queryKey: ['staff', 'roster'],
+    queryFn: () => staffService.getRoster(),
+    enabled: !isOwner,
+  });
+
+  // Today's schedule for whoever this screen is about.
+  const { data: todayRes } = useQuery({
+    queryKey: ['bookings', 'barber', todayKey()],
+    queryFn: () => bookingsService.getBarberBookings({ date: todayKey() }),
+  });
+
+  // Reviews follow the barber who earned them, so a staff member's page shows
+  // only theirs — the owner's page shows the ones credited to the shop itself.
+  const { data: reviewsRes } = useQuery({
+    queryKey: ['staff-reviews', owner?.id, id],
+    queryFn: () => reviewsService.getBarberReviews(owner!.id, isOwner ? undefined : id),
+    enabled: !!owner?.id,
+  });
+  const staffReviews = reviewsRes?.data.data ?? [];
+
+  const todaysAppointments = (todayRes?.data.data ?? [])
+    .filter((b) => (isOwner ? !b.staffBarberId : b.staffBarberId === id))
+    .map((b) => ({
+      client: b.clientName,
+      service: b.serviceName,
+      status: b.status,
+      start: new Date(b.scheduledAt),
+      end: new Date(b.endsAt),
+    }));
+
   const ownerMember: StaffMember | undefined = isOwner && owner
     ? {
         id: 'owner',
         name: owner.fullName ?? 'You',
         role: 'Owner · Barber',
         rating: owner.rating && owner.rating > 0 ? owner.rating : 5.0,
+        reviewCount: owner.reviewCount ?? 0,
         avatarUrl: owner.avatarUrl ?? null,
         isActive: true,
-        totalAppointments: 56,   // TODO: real owner analytics endpoint
-        revenueThisMonth: 1480,
+        // Counted from today's real bookings; the roster endpoint covers staff.
+        totalAppointments: todaysAppointments.filter((a) => a.status === 'completed').length,
+        revenueThisMonth: 0,
         phoneNumber: owner.phone ?? '',
         email: owner.email ?? '',
         joinedDate: owner.createdAt ?? new Date().toISOString(),
-        assignedServices: ['Haircut & Beard', 'Executive Fade', 'Skin Fade'],
       }
     : undefined;
 
-  // In production: fetch from API using id
   const member: StaffMember | undefined = isOwner
     ? ownerMember
-    : MOCK_STAFF.find((m) => m.id === id);
+    : (rosterRes?.data.data ?? []).find((m) => m.id === id);
 
   const visibleTabs: TabName[] = isOwner ? ['Overview', 'Workspace'] : TABS;
 
@@ -866,7 +876,7 @@ export default function StaffDetailScreen() {
 
       {/* ── Tab content ────────────────────────────────────── */}
       <View className="flex-1 bg-neutral-50">
-        {activeTab === 'Overview' && <OverviewTab member={member} />}
+        {activeTab === 'Overview' && <OverviewTab member={member} appointments={todaysAppointments} />}
         {activeTab === 'Personal' && !isOwner && (
           <PersonalTab
             member={member}
@@ -874,7 +884,7 @@ export default function StaffDetailScreen() {
             onSaved={showToast}
           />
         )}
-        {activeTab === 'Workspace' && <WorkspaceTab member={member} />}
+        {activeTab === 'Workspace' && <WorkspaceTab member={member} reviews={staffReviews} />}
       </View>
 
       {/* ── Success toast ───────────────────────────────────── */}

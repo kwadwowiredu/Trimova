@@ -2,6 +2,9 @@ import type { Request, Response } from 'express';
 import { getSupabase } from '../utils/supabase';
 import { sendSuccess, sendError, sendPaginated } from '../utils/response';
 import { generateSlots, type BusyBlock } from '../utils/slots';
+import { notify, notifyMany, whenLabel, cedis } from '../utils/notify';
+import { applyCancellationPolicy, HALF_FEE_WINDOW_HOURS } from '../utils/cancellationPolicy';
+import { releaseEscrow, settleDueAppointments, requestConfirmations } from '../utils/settlement';
 
 /**
  * Appointments — the transaction that joins the client and barber apps.
@@ -68,12 +71,18 @@ export function mapBooking(row: Row) {
     completedAt: row.completed_at ?? null,
     cancelledAt: row.cancelled_at ?? null,
     cancelReason: row.cancel_reason ?? null,
+    // Escrow state, so the client app knows whether to ask "how was it?".
+    clientConfirmedAt: row.client_confirmed_at ?? null,
+    disputedAt: row.disputed_at ?? null,
+    releasedAt: row.released_at ?? null,
     clientLocation: row.client_address
       ? { address: row.client_address, lat: row.client_lat, lng: row.client_lng }
       : null,
     notes: row.notes ?? null,
     barberName: performer?.full_name ?? '',
     barberAvatarUrl: performer?.avatar_url ?? null,
+    // Whoever the client would actually ring about this appointment.
+    barberPhone: performer?.phone ?? barber?.phone ?? null,
     shopName: barber?.full_name ?? '',
     clientName: client?.full_name ?? '',
     clientAvatarUrl: client?.avatar_url ?? null,
@@ -103,9 +112,85 @@ async function expireStaleHolds() {
   if (error) console.error('[bookings] expire_stale_holds failed:', error.message);
 }
 
+/**
+ * Close out appointments whose time has passed.
+ *
+ * Completion is time-based rather than a button the barber taps: a barber
+ * shouldn't be able to collect on a cut they never gave, and shouldn't lose
+ * money because they forgot to tap something at the end of a long day. Once an
+ * appointment's end time is behind us, the job happened.
+ *
+ * Runs opportunistically before any read of a booking list, so no cron is
+ * needed. Notifications and payouts are emitted per booking, exactly as the
+ * manual path used to.
+ */
+async function completePastAppointments() {
+  const supabase = getSupabase();
+
+  const { data: due, error } = await supabase
+    .from('appointments')
+    .select('*')
+    .in('status', ['confirmed', 'in_progress'])
+    .lt('ends_at', new Date().toISOString())
+    .limit(50);
+
+  if (error) {
+    console.error('[bookings] completePastAppointments lookup failed:', error.message);
+    return;
+  }
+  if (!due || due.length === 0) return;
+
+  const now = new Date().toISOString();
+
+  for (const booking of due) {
+    // Verify the update actually matched — Supabase reports success on zero rows,
+    // and a concurrent request may already have closed this one out.
+    // Completion marks the job as done. It does NOT release the money — that
+    // waits on the client's confirmation window, so a barber who never showed
+    // up can't be paid just because the clock ran out. See utils/settlement.
+    const { data: updated } = await supabase
+      .from('appointments')
+      .update({ status: 'completed', completed_at: now })
+      .eq('id', booking.id)
+      .in('status', ['confirmed', 'in_progress'])
+      .select('id');
+
+    if (!updated || updated.length === 0) continue;
+
+    const mapped = mapBooking(booking);
+
+    if (booking.payment_status !== 'paid') {
+      await notify({
+        userId: mapped.clientId,
+        type: 'booking_completed',
+        title: 'Appointment completed',
+        body: `Your ${mapped.serviceName} appointment is done.`,
+        bookingId: mapped.id,
+      });
+    }
+    // Paid bookings get their "how was it?" ask from requestConfirmations,
+    // which also guarantees only one is ever sent.
+  }
+
+  console.log(`[bookings] auto-completed ${due.length} past appointment(s)`);
+}
+
+/**
+ * Housekeeping both booking lists depend on: free lapsed holds, close out past
+ * jobs, ask clients to confirm, and release escrow whose window has closed.
+ */
+async function reconcile() {
+  await Promise.all([expireStaleHolds(), completePastAppointments()]);
+  // These read what the two above just wrote, so they run after.
+  await Promise.all([requestConfirmations(), settleDueAppointments()]);
+}
+
 function minutesFromNow(mins: number): string {
   return new Date(Date.now() + mins * 60_000).toISOString();
 }
+
+/** Postgres rejects a malformed uuid with a 500, so screen ids at the edge. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** "16:00:00" → "16:00", so the picker can compare times as plain strings. */
 const hhmm = (t: string) => t.slice(0, 5);
@@ -263,9 +348,22 @@ export const bookingController = {
       return;
     }
 
+    // Tell whoever has to act next. For a shop that's the staff member doing
+    // the cut; for a freelancer it's the barber who must approve the request.
+    const booked = mapBooking(data);
+    await notify({
+      userId: (data.staff_barber_id as string) ?? (data.barber_id as string),
+      type: 'booking_created',
+      title: requiresApproval ? 'New booking request' : 'New booking',
+      body: `${booked.clientName} — ${booked.serviceName}, ${whenLabel(booked.scheduledAt)}.${
+        requiresApproval ? ' Accept or decline it.' : ''
+      }`,
+      bookingId: booked.id,
+    });
+
     sendSuccess(
       res,
-      mapBooking(data),
+      booked,
       requiresApproval
         ? 'Request sent. The barber will confirm shortly.'
         : 'Slot held. Complete payment to confirm.',
@@ -275,7 +373,7 @@ export const bookingController = {
 
   /** GET /bookings/client — the signed-in client's own appointments. */
   async listForClient(req: Request, res: Response) {
-    await expireStaleHolds();
+    await reconcile();
     const supabase = getSupabase();
     const { status, page = '1', limit = '50' } = req.query as Record<string, string>;
 
@@ -313,7 +411,7 @@ export const bookingController = {
    * a staff barber sees only their own.
    */
   async listForBarber(req: Request, res: Response) {
-    await expireStaleHolds();
+    await reconcile();
     const supabase = getSupabase();
     const { status, date, page = '1', limit = '50' } = req.query as Record<string, string>;
 
@@ -394,6 +492,10 @@ export const bookingController = {
 
     if (!barberId || !date) {
       sendError(res, 'A barber and a date are required.');
+      return;
+    }
+    if (!UUID_RE.test(barberId) || (staffBarberId && !UUID_RE.test(staffBarberId))) {
+      sendError(res, 'That barber could not be found.', 404);
       return;
     }
     const dayStart = new Date(`${date}T00:00:00`);
@@ -482,6 +584,10 @@ export const bookingController = {
 
     if (!barberId || !from || !to) {
       sendError(res, 'A barber and a date range are required.');
+      return;
+    }
+    if (!UUID_RE.test(barberId) || (staffBarberId && !UUID_RE.test(staffBarberId))) {
+      sendError(res, 'That barber could not be found.', 404);
       return;
     }
 
@@ -651,7 +757,22 @@ export const bookingController = {
       sendError(res, "We couldn't confirm that booking. Please try again.", 500);
       return;
     }
-    sendSuccess(res, mapBooking(data), 'Booking confirmed.');
+
+    const confirmed = mapBooking(data);
+    const fee = confirmed.travelFee > 0 ? ` A travel fee of ${cedis(confirmed.travelFee)} was added.` : '';
+    await notify({
+      userId: confirmed.clientId,
+      // An unpaid booking now needs money; a paid one is simply settled.
+      type: confirmed.paymentStatus === 'paid' ? 'booking_confirmed' : 'payment_due',
+      title: confirmed.paymentStatus === 'paid' ? 'Booking confirmed' : 'Request accepted',
+      body:
+        confirmed.paymentStatus === 'paid'
+          ? `${confirmed.barberName} confirmed your ${confirmed.serviceName} on ${whenLabel(confirmed.scheduledAt)}.`
+          : `${confirmed.barberName} accepted your request.${fee} Pay ${cedis(confirmed.total)} to lock it in.`,
+      bookingId: confirmed.id,
+    });
+
+    sendSuccess(res, confirmed, 'Booking confirmed.');
   },
 
   /** PATCH /bookings/:id/decline — the barber turns the request down. */
@@ -703,7 +824,19 @@ export const bookingController = {
       sendError(res, "We couldn't decline that booking. Please try again.", 500);
       return;
     }
-    sendSuccess(res, mapBooking(data), 'Booking declined.');
+
+    const declined = mapBooking(data);
+    await notify({
+      userId: declined.clientId,
+      type: 'booking_declined',
+      title: 'Request declined',
+      body: `${declined.barberName} can't take your ${declined.serviceName} on ${whenLabel(declined.scheduledAt)}.${
+        declined.cancelReason ? ` Reason: ${declined.cancelReason}` : ''
+      }`,
+      bookingId: declined.id,
+    });
+
+    sendSuccess(res, declined, 'Booking declined.');
   },
 
   /**
@@ -756,13 +889,347 @@ export const bookingController = {
       return;
     }
 
-    // Trimova still holds the money, so refunding is just handing it back.
-    if (booking.payment_status === 'paid' && booking.payment_reference) {
-      const { refundBookingPayment } = await import('./paymentController');
-      await refundBookingPayment(booking);
+    // Trimova still holds the money, so refunding is just handing it back —
+    // minus whatever the cancellation policy forfeits. A barber cancelling
+    // their own booking never costs the client anything.
+    const wasPaid = Boolean(booking.payment_status === 'paid' && booking.payment_reference);
+    const total = (parseFloat(String(booking.service_price)) || 0) +
+      (parseFloat(String(booking.travel_fee)) || 0);
+    const outcome = applyCancellationPolicy(booking.scheduled_at, total, wasPaid);
+    const forfeit = isClient ? outcome.feeAmount : 0;
+
+    if (wasPaid) {
+      const { refundBookingPayment, partialRefund } = await import('./paymentController');
+      if (forfeit > 0) {
+        await partialRefund(booking, outcome.refundAmount, 'Late cancellation fee');
+      } else {
+        await refundBookingPayment(booking);
+      }
     }
 
-    sendSuccess(res, mapBooking(data), 'Booking cancelled.');
+    // Tell the OTHER party — whoever didn't press the button.
+    const cancelled = mapBooking(data);
+    const reasonText = cancelled.cancelReason ? ` Reason: ${cancelled.cancelReason}` : '';
+    await notify(
+      isClient
+        ? {
+            userId: (booking.staff_barber_id as string) ?? (booking.barber_id as string),
+            type: 'booking_cancelled',
+            title: 'Booking cancelled',
+            body: `${cancelled.clientName} cancelled their ${cancelled.serviceName} on ${whenLabel(cancelled.scheduledAt)}.${reasonText}`,
+            bookingId: cancelled.id,
+          }
+        : {
+            userId: cancelled.clientId,
+            type: 'booking_cancelled',
+            title: 'Booking cancelled',
+            body: `${cancelled.barberName} cancelled your ${cancelled.serviceName} on ${whenLabel(cancelled.scheduledAt)}.${reasonText}${
+              wasPaid ? ' Your payment is being refunded in full.' : ''
+            }`,
+            bookingId: cancelled.id,
+          },
+    );
+
+    sendSuccess(
+      res,
+      cancelled,
+      forfeit > 0
+        ? `Cancelled. Under the cancellation policy ${cedis(forfeit)} was forfeited and ${cedis(outcome.refundAmount)} refunded.`
+        : wasPaid
+          ? 'Cancelled. Your payment is being refunded in full.'
+          : 'Booking cancelled.',
+    );
+  },
+
+  /**
+   * PATCH /bookings/:id/confirm-service — the client says it went ahead.
+   *
+   * This is how Trimova knows a haircut actually happened. Confirming releases
+   * the money immediately rather than making the barber wait out the window.
+   */
+  async confirmService(req: Request, res: Response) {
+    const supabase = getSupabase();
+    const { data: booking, error } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error || !booking) {
+      sendError(res, 'That booking could not be found.', 404);
+      return;
+    }
+    if (booking.client_id !== req.user!.sub) {
+      sendError(res, 'Only the client can confirm their own appointment.', 403);
+      return;
+    }
+    if (booking.status !== 'completed') {
+      sendError(res, 'This appointment has not finished yet.');
+      return;
+    }
+    if (booking.disputed_at) {
+      sendError(res, 'This appointment is under review by our support team.');
+      return;
+    }
+
+    await supabase
+      .from('appointments')
+      .update({ client_confirmed_at: new Date().toISOString() })
+      .eq('id', booking.id);
+
+    if (booking.payment_status === 'paid' && !booking.released_at) {
+      await releaseEscrow(booking);
+    }
+
+    const { data: fresh } = await supabase
+      .from('appointments')
+      .select(SELECT_WITH_PEOPLE)
+      .eq('id', booking.id)
+      .single();
+
+    sendSuccess(res, fresh ? mapBooking(fresh) : null, 'Thanks for confirming.');
+  },
+
+  /**
+   * PATCH /bookings/:id/dispute — the client says it did NOT happen.
+   *
+   * Freezes the money where it is. Nothing is released automatically after
+   * this: a person decides, from the admin panel.
+   */
+  async dispute(req: Request, res: Response) {
+    const { reason } = req.body as { reason?: string };
+    const supabase = getSupabase();
+
+    const { data: booking, error } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error || !booking) {
+      sendError(res, 'That booking could not be found.', 404);
+      return;
+    }
+    if (booking.client_id !== req.user!.sub) {
+      sendError(res, 'Only the client can report a problem with their booking.', 403);
+      return;
+    }
+    if (booking.released_at) {
+      sendError(
+        res,
+        'Payment for this appointment has already been released. Please contact support.',
+      );
+      return;
+    }
+
+    const { data, error: updateError } = await supabase
+      .from('appointments')
+      .update({
+        disputed_at: new Date().toISOString(),
+        dispute_reason: reason?.trim() || 'Client reported the appointment did not happen',
+      })
+      .eq('id', booking.id)
+      .select(SELECT_WITH_PEOPLE)
+      .single();
+
+    if (updateError || !data) {
+      console.error('[bookings] dispute failed:', updateError);
+      sendError(res, "We couldn't record that. Please try again.", 500);
+      return;
+    }
+
+    const mapped = mapBooking(data);
+    await notify({
+      userId: (booking.staff_barber_id as string) ?? (booking.barber_id as string),
+      type: 'system',
+      title: 'A client reported a problem',
+      body: `${mapped.clientName} says their ${mapped.serviceName} on ${whenLabel(mapped.scheduledAt)} didn't go ahead. Payment is on hold while we look into it.`,
+      bookingId: mapped.id,
+    });
+
+    sendSuccess(
+      res,
+      mapped,
+      "Thanks for telling us. We've put the payment on hold and will be in touch.",
+    );
+  },
+
+  /**
+   * GET /bookings/:id/policy — what cancelling or moving this booking costs
+   * right now. The app asks before showing a confirmation, so the client sees
+   * the real figure rather than a generic warning.
+   */
+  async policy(req: Request, res: Response) {
+    const supabase = getSupabase();
+    const { data: booking, error } = await supabase
+      .from('appointments')
+      .select('client_id, barber_id, staff_barber_id, scheduled_at, service_price, travel_fee, payment_status, status')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error || !booking) {
+      sendError(res, 'That booking could not be found.', 404);
+      return;
+    }
+    const me = req.user!.sub;
+    if (booking.client_id !== me && booking.barber_id !== me && booking.staff_barber_id !== me) {
+      sendError(res, 'You do not have access to this booking.', 403);
+      return;
+    }
+
+    const total = (parseFloat(String(booking.service_price)) || 0) +
+      (parseFloat(String(booking.travel_fee)) || 0);
+
+    sendSuccess(res, {
+      ...applyCancellationPolicy(
+        booking.scheduled_at,
+        total,
+        booking.payment_status === 'paid',
+      ),
+      total,
+    });
+  },
+
+  /**
+   * PATCH /bookings/:id/reschedule — move an appointment to a new time.
+   *
+   * The same cancellation policy applies: moving a slot at short notice costs
+   * the barber the same lost time that cancelling would, so a late reschedule
+   * forfeits the same share. The old slot is only released once the new one is
+   * secured, so a client can never end up with neither.
+   */
+  async reschedule(req: Request, res: Response) {
+    const { scheduledAt } = req.body as { scheduledAt?: string };
+
+    if (!scheduledAt) {
+      sendError(res, 'Please choose a new time.');
+      return;
+    }
+    const start = new Date(scheduledAt);
+    if (Number.isNaN(start.getTime())) {
+      sendError(res, 'That appointment time is not valid.');
+      return;
+    }
+    if (start.getTime() <= Date.now()) {
+      sendError(res, 'That time has already passed. Please pick another slot.');
+      return;
+    }
+
+    const supabase = getSupabase();
+    await expireStaleHolds();
+
+    const { data: booking, error: findError } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (findError || !booking) {
+      sendError(res, 'That booking could not be found.', 404);
+      return;
+    }
+
+    const me = req.user!.sub;
+    const isClient = booking.client_id === me;
+    const isBarber = booking.barber_id === me || booking.staff_barber_id === me;
+    if (!isClient && !isBarber) {
+      sendError(res, 'You do not have access to this booking.', 403);
+      return;
+    }
+    if (!['pending', 'confirmed'].includes(booking.status)) {
+      sendError(res, 'This booking can no longer be moved.');
+      return;
+    }
+
+    // Respect the barber's own notice rules for the NEW time.
+    const { data: profile } = await supabase
+      .from('barber_profiles')
+      .select('booking_lead_minutes, booking_future_days')
+      .eq('user_id', booking.barber_id)
+      .maybeSingle();
+
+    const leadMinutes = profile?.booking_lead_minutes ?? 30;
+    if (start.getTime() < Date.now() + leadMinutes * 60_000) {
+      sendError(res, `This barber needs at least ${leadMinutes} minutes' notice.`);
+      return;
+    }
+    const futureDays = profile?.booking_future_days ?? 90;
+    if (start.getTime() > Date.now() + futureDays * 86_400_000) {
+      sendError(res, `You can only book up to ${futureDays} days ahead.`);
+      return;
+    }
+
+    const duration = Number(booking.service_duration_minutes) || 30;
+    const end = new Date(start.getTime() + duration * 60_000);
+
+    const total = (parseFloat(String(booking.service_price)) || 0) +
+      (parseFloat(String(booking.travel_fee)) || 0);
+    const outcome = applyCancellationPolicy(
+      booking.scheduled_at,
+      total,
+      booking.payment_status === 'paid',
+    );
+
+    // A client moving at the last minute forfeits under the policy they
+    // agreed to; a barber moving their own booking never charges the client.
+    if (isClient && outcome.feeRate === 1) {
+      sendError(
+        res,
+        `It's less than ${HALF_FEE_WINDOW_HOURS} hour before your appointment, so it can no longer be moved. You can cancel it instead.`,
+      );
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('appointments')
+      .update({ scheduled_at: start.toISOString(), ends_at: end.toISOString() })
+      .eq('id', booking.id)
+      .select(SELECT_WITH_PEOPLE)
+      .single();
+
+    if (error || !data) {
+      if (error?.code === '23P01' || /appointments_no_overlap/.test(error?.message ?? '')) {
+        sendError(res, 'Sorry, that slot was just taken. Please choose another time.', 409);
+        return;
+      }
+      console.error('[bookings] reschedule failed:', error);
+      sendError(res, "We couldn't move that booking. Please try again.", 500);
+      return;
+    }
+
+    const moved = mapBooking(data);
+
+    // Charge the late-move fee by partially refunding what we hold.
+    if (isClient && outcome.feeRate > 0 && booking.payment_reference) {
+      const { partialRefund } = await import('./paymentController');
+      await partialRefund(booking, outcome.refundAmount, 'Late reschedule fee');
+    }
+
+    await notify(
+      isClient
+        ? {
+            userId: (booking.staff_barber_id as string) ?? (booking.barber_id as string),
+            type: 'booking_rescheduled',
+            title: 'Booking moved',
+            body: `${moved.clientName} moved their ${moved.serviceName} to ${whenLabel(moved.scheduledAt)}.`,
+            bookingId: moved.id,
+          }
+        : {
+            userId: moved.clientId,
+            type: 'booking_rescheduled',
+            title: 'Booking moved',
+            body: `${moved.barberName} moved your ${moved.serviceName} to ${whenLabel(moved.scheduledAt)}.`,
+            bookingId: moved.id,
+          },
+    );
+
+    sendSuccess(
+      res,
+      moved,
+      outcome.feeRate > 0 && isClient
+        ? `Moved. A late-change fee of ${cedis(outcome.feeAmount)} was applied.`
+        : 'Booking moved.',
+    );
   },
 
   /**
@@ -848,11 +1315,38 @@ export const bookingController = {
       return;
     }
 
+    const done = mapBooking(data);
+
     if (booking.payment_status === 'paid') {
       const { recordPayoutForBooking } = await import('./paymentController');
       await recordPayoutForBooking(booking);
+
+      await notifyMany([
+        {
+          userId: done.clientId,
+          type: 'booking_completed',
+          title: 'Appointment completed',
+          body: `Hope you're happy with your ${done.serviceName}. Your payment has been released to ${done.barberName}.`,
+          bookingId: done.id,
+        },
+        {
+          userId: (booking.staff_barber_id as string) ?? (booking.barber_id as string),
+          type: 'payout',
+          title: 'Payment released',
+          body: `${cedis(done.total)} from ${done.clientName}'s ${done.serviceName} is on its way to you.`,
+          bookingId: done.id,
+        },
+      ]);
+    } else {
+      await notify({
+        userId: done.clientId,
+        type: 'booking_completed',
+        title: 'Appointment completed',
+        body: `Hope you're happy with your ${done.serviceName} from ${done.barberName}.`,
+        bookingId: done.id,
+      });
     }
 
-    sendSuccess(res, mapBooking(data), 'Appointment completed.');
+    sendSuccess(res, done, 'Appointment completed.');
   },
 };

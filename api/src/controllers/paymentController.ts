@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { getSupabase } from '../utils/supabase';
 import { sendSuccess, sendError } from '../utils/response';
 import { mapBooking } from './bookingController';
+import { notifyMany, whenLabel, cedis } from '../utils/notify';
 import {
   initializeTransaction,
   verifyTransaction,
@@ -350,6 +351,26 @@ async function settlePayment(
     raw: charge.raw,
   });
 
+  // Both sides care that the money landed: the client wants the receipt, the
+  // barber needs to know the slot is now firm.
+  const mapped = mapBooking(data);
+  await notifyMany([
+    {
+      userId: mapped.clientId,
+      type: 'payment_received',
+      title: 'Booking confirmed',
+      body: `You paid ${cedis(mapped.total)} for ${mapped.serviceName} with ${mapped.barberName} on ${whenLabel(mapped.scheduledAt)}. We'll hold it until your appointment is done.`,
+      bookingId: mapped.id,
+    },
+    {
+      userId: (booking.staff_barber_id as string) ?? (booking.barber_id as string),
+      type: 'payment_received',
+      title: 'Booking paid',
+      body: `${mapped.clientName} paid ${cedis(mapped.total)} for ${mapped.serviceName} on ${whenLabel(mapped.scheduledAt)}.`,
+      bookingId: mapped.id,
+    },
+  ]);
+
   return data;
 }
 
@@ -388,6 +409,59 @@ export async function recordPayoutForBooking(booking: Row): Promise<void> {
     status: isDemoMode() ? 'success' : 'pending',
     channel: isDemoMode() ? 'demo' : null,
   });
+}
+
+/**
+ * Refund part of what a client paid, keeping the rest as a policy fee.
+ *
+ * The kept share isn't Trimova's windfall — it compensates the barber for a
+ * slot they can no longer sell, so it's ledgered as a transfer to them.
+ */
+export async function partialRefund(
+  booking: Row,
+  refundAmount: number,
+  reason: string,
+): Promise<void> {
+  const supabase = getSupabase();
+  const total = bookingTotal(booking);
+  const kept = Math.round((total - refundAmount) * 100) / 100;
+  const reference = booking.payment_reference as string;
+
+  const result = await refundTransaction(reference, refundAmount);
+
+  await logTransaction({
+    reference: `${reference}-REF`,
+    appointmentId: booking.id,
+    clientId: booking.client_id,
+    barberId: booking.barber_id,
+    amount: refundAmount,
+    type: 'refund',
+    status: result.ok ? 'success' : 'failed',
+    channel: isDemoMode() ? 'demo' : null,
+  });
+
+  if (kept > 0) {
+    await logTransaction({
+      reference: `${reference}-FEE`,
+      appointmentId: booking.id,
+      clientId: booking.client_id,
+      barberId: booking.barber_id,
+      amount: kept,
+      type: 'transfer',
+      status: isDemoMode() ? 'success' : 'pending',
+      channel: isDemoMode() ? 'demo' : null,
+    });
+  }
+
+  if (result.ok) {
+    // Escrow is settled either way, so release it and record why.
+    await supabase
+      .from('appointments')
+      .update({ payment_status: 'refunded', released_at: new Date().toISOString() })
+      .eq('id', booking.id);
+  } else {
+    console.error(`[payments] partial refund failed for ${reference} (${reason}): ${result.message}`);
+  }
 }
 
 /** Hand a cancelled booking's money back to the client. */

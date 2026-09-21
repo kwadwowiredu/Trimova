@@ -6,6 +6,7 @@ import {
   ScrollView,
   Animated,
   Image,
+  FlatList,
   Modal,
   Share,
   Linking,
@@ -28,7 +29,7 @@ import { T, HAIRLINE } from '@/constants/clientTheme';
 import { barbersService } from '@/services/barbers';
 import { useClientBrowseStore } from '@/stores/clientBrowseStore';
 import { chip } from '@/constants/clientTheme';
-import { MOCK_SHOP_STAFF, MOCK_SHOP_REVIEWS } from '@/utils/mockShopData';
+import { reviewsService } from '@/services/reviews';
 import { ReviewRow } from '@/components/barber/ReviewRow';
 import { tapLight, tapSelect, tapMedium } from '@/utils/haptics';
 import { barberProfileLink } from '@/utils/constants';
@@ -134,16 +135,16 @@ function StaffFaceCard({ name, role, rating, avatarUrl, onPress }: {
           <Image source={{ uri: avatarUrl }} style={{ width: 88, height: 88, borderRadius: 44 }} resizeMode="cover" />
         ) : (
           <View style={{ width: 88, height: 88, borderRadius: 44, backgroundColor: '#eef0ff', alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontSize: 28, fontWeight: '800', color: T.accent }}>{initials.charAt(0)}</Text>
+            <Text style={{ fontSize: 28, fontWeight: '600', color: T.accent }}>{initials.charAt(0)}</Text>
           </View>
         )}
         {/* Rating pill overlapping the photo's bottom edge */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#ffffff', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginTop: -14, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 5, elevation: 3 }}>
           <Star size={12} color={T.star} fill={T.star} />
-          <Text style={{ fontSize: 13, fontWeight: '800', color: T.text }}>{rating.toFixed(1)}</Text>
+          <Text style={{ fontSize: 13, fontWeight: '600', color: T.text }}>{rating.toFixed(1)}</Text>
         </View>
       </View>
-      <Text style={{ fontSize: 15, fontWeight: '800', color: T.text, marginTop: 8, textAlign: 'center' }} numberOfLines={1}>
+      <Text style={{ fontSize: 13, fontWeight: '700', color: T.text, marginTop: 8, textAlign: 'center' }} numberOfLines={1}>
         {name.split(' ')[0]}
       </Text>
       <Text style={{ fontSize: 12, color: T.textFaint, marginTop: 2, textAlign: 'center' }} numberOfLines={1}>{role}</Text>
@@ -155,7 +156,16 @@ export default function ClientBarberDetailScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  // The viewer works on an index into a photo set, not a lone URL, so the
+  // client can swipe through a barber's portfolio instead of backing out
+  // between every shot.
+  const [viewerPhotos, setViewerPhotos] = useState<string[]>([]);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+
+  function openViewer(photos: string[], index: number) {
+    setViewerPhotos(photos);
+    setViewerIndex(index);
+  }
   const [activeSection, setActiveSection] = useState<SectionName>('Services');
 
   const { toggleFavorite, recordView, removeBarber } = useClientBrowseStore();
@@ -182,7 +192,21 @@ export default function ClientBarberDetailScreen() {
   const title = barber?.businessName || barber?.fullName || '';
   const status = openStatus(barber?.workingHours);
   const isShop = barber?.barberType !== 'mobile';
-  const recentReviews = MOCK_SHOP_REVIEWS.slice(0, 5);
+
+  // The shop's real team and its most recent reviews.
+  const { data: staffRes } = useQuery({
+    queryKey: ['shop-staff', id],
+    queryFn: () => reviewsService.getShopStaff(id!),
+    enabled: !!id && isShop,
+  });
+  const staff = staffRes?.data.data ?? [];
+
+  const { data: reviewsRes } = useQuery({
+    queryKey: ['reviews', id],
+    queryFn: () => reviewsService.getBarberReviews(id!),
+    enabled: !!id,
+  });
+  const recentReviews = (reviewsRes?.data.data ?? []).slice(0, 5);
 
   // Sticky section tab bar: fades/slides in once the hero scrolls away.
   const tabBarOpacity = scrollY.interpolate({
@@ -388,7 +412,7 @@ export default function ClientBarberDetailScreen() {
             }}
           >
             {cover ? (
-              <Pressable onPress={() => setViewerUri(cover)}>
+              <Pressable onPress={() => openViewer(cover ? [cover, ...portfolio.filter((p) => p !== cover)] : portfolio, 0)}>
                 <Image source={{ uri: cover }} style={{ width, height: HERO_H }} resizeMode="cover" />
               </Pressable>
             ) : (
@@ -427,25 +451,25 @@ export default function ClientBarberDetailScreen() {
           {/* ── Identity ─────────────────────────────────────────── */}
           <View style={{ paddingHorizontal: 20 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={{ fontSize: 27, fontWeight: '800', color: T.text, flexShrink: 1 }}>{title}</Text>
-              {barber.isVerified && <BadgeCheck size={21} color={T.accent} />}
+              <Text style={{ fontSize: 22, fontWeight: '700', color: '#023047', flexShrink: 1 }}>{title}</Text>
+              {barber.isVerified && <BadgeCheck size={20} color={T.accent} />}
             </View>
             {/* Venue type — not the barber's name */}
-            <Text style={{ fontSize: 13.5, fontWeight: '600', color: T.textFaint, marginTop: 3 }}>
+            <Text style={{ fontSize: 13, fontWeight: '500', color: T.textFaint, marginTop: 3 }}>
               {isShop ? 'Barbershop' : 'Mobile Barber'}
             </Text>
 
             {/* Avg rating + stars + (reviews) — no "New" text */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 10 }}>
-              <Text style={{ fontSize: 16, fontWeight: '800', color: T.text }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 12 }}>
+              <Text style={{ fontSize: 16, fontWeight: '500', color: T.text }}>
                 {barber.rating > 0 ? barber.rating.toFixed(1) : '–'}
               </Text>
               <Stars value={barber.rating} />
-              <Text style={{ fontSize: 14, fontWeight: '700', color: T.accent }}>({barber.reviewCount})</Text>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: T.accent }}>({barber.reviewCount})</Text>
             </View>
 
             {/* Location with icon */}
-            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
               <MapPin size={15} color={T.textFaint} style={{ marginTop: 3 }} />
               <Text style={{ flex: 1, fontSize: 15, color: T.textMuted, lineHeight: 22 }}>
                 {barber.locationAddress ?? 'Location not set'}
@@ -454,9 +478,9 @@ export default function ClientBarberDetailScreen() {
 
             {/* Open/closed with clock icon — green open, red closed */}
             {status && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 7 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Clock size={14} color={status.open ? T.onSuccess : T.onError} />
-                <Text style={{ fontSize: 15, fontWeight: '600', color: status.open ? T.onSuccess : T.onError }}>
+                <Text style={{ fontSize: 15, fontWeight: '400', color: status.open ? T.onSuccess : T.onError }}>
                   {status.text}
                 </Text>
               </View>
@@ -468,7 +492,7 @@ export default function ClientBarberDetailScreen() {
               <View style={{ flexDirection: 'row', marginTop: 12 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: chip('success').bg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 }}>
                   <Navigation size={13} color={chip('success').fg} />
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: chip('success').fg }}>
+                  <Text style={{ fontSize: 12, fontWeight: '500', color: chip('success').fg }}>
                     Travels up to {barber.serviceRadius ?? '–'} km · further by request
                   </Text>
                 </View>
@@ -478,7 +502,7 @@ export default function ClientBarberDetailScreen() {
 
           {/* ── Services ─────────────────────────────────────────── */}
           <SectionAnchor name="Services">
-            <Text style={{ fontSize: 22, fontWeight: '800', color: T.text, paddingHorizontal: 20, marginTop: 30, marginBottom: 8 }}>Services</Text>
+            <Text style={{ fontSize: 18, fontWeight: '600', color: '#2a6f97', paddingHorizontal: 20, marginTop: 40, marginBottom: 2 }}>Services</Text>
             <View style={{ paddingHorizontal: 20 }}>
               {services.length === 0 ? (
                 <Text style={{ fontSize: 13, color: T.textFaint }}>This barber hasn't listed services yet.</Text>
@@ -487,16 +511,16 @@ export default function ClientBarberDetailScreen() {
                   {services.slice(0, 5).map((s, i) => (
                     <View key={s.id} style={{ paddingVertical: 15, borderTopWidth: i === 0 ? 0 : HAIRLINE, borderTopColor: T.border }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <View style={{ flex: 1, paddingRight: 12 }}>
-                          <Text style={{ fontSize: 16.5, fontWeight: '700', color: T.text }}>{s.name}</Text>
-                          <Text style={{ fontSize: 13, color: T.textFaint, marginTop: 2 }}>{fmtDuration(s.durationMinutes)}</Text>
-                          <Text style={{ fontSize: 14, fontWeight: '700', color: T.text, marginTop: 4 }}>from GH₵{s.price.toFixed(0)}</Text>
-                        </View>
+                          <View style={{ flex: 1, paddingRight: 12 }}>
+                            <Text style={{ fontSize: 15, fontWeight: '600', color: T.accent }}>{s.name}</Text>
+                            <Text style={{ fontSize: 13, color: T.textFaint, marginTop: 2 }}>{fmtDuration(s.durationMinutes)}</Text>
+                            <Text style={{ fontSize: 14, fontWeight: '600', color: '#52b788', marginTop: 4 }}>GH₵{s.price.toFixed(0)}</Text>
+                          </View>
                         <Pressable
-                          onPress={() => handleBook(s.id)}
-                          style={{ borderWidth: HAIRLINE, borderColor: T.border, borderRadius: 999, paddingHorizontal: 22, paddingVertical: 10 }}
+                         onPress={() => handleBook(s.id)}
+                         style={{ borderWidth: HAIRLINE, borderColor: T.accent, borderRadius: 999, paddingHorizontal: 22, paddingVertical: 10 }}
                         >
-                          <Text style={{ fontSize: 14.5, fontWeight: '700', color: T.text }}>Book</Text>
+                          <Text style={{ fontSize: 14.5, fontWeight: '600', color: T.accent }}>Book</Text>
                         </Pressable>
                       </View>
                     </View>
@@ -506,7 +530,7 @@ export default function ClientBarberDetailScreen() {
                       onPress={() => { tapLight(); router.push(`/(client)/barber/${id}/services` as never); }}
                       style={{ borderWidth: HAIRLINE, borderColor: T.border, borderRadius: 999, paddingVertical: 14, alignItems: 'center', marginTop: 8 }}
                     >
-                      <Text style={{ fontSize: 15, fontWeight: '700', color: T.text }}>See all ({services.length})</Text>
+                      <Text style={{ fontSize: 15, fontWeight: '600', color: T.text }}>See all ({services.length})</Text>
                     </Pressable>
                   )}
                 </>
@@ -517,7 +541,7 @@ export default function ClientBarberDetailScreen() {
           {/* ── Staff ────────────────────────────────────────────── */}
           {isShop && (
             <SectionAnchor name="Staff">
-              <Text style={{ fontSize: 22, fontWeight: '800', color: T.text, paddingHorizontal: 20, marginTop: 30, marginBottom: 16 }}>Staff</Text>
+              <Text style={{ fontSize: 18, fontWeight: '600', color: '#2a6f97', paddingHorizontal: 20, marginTop: 30, marginBottom: 16 }}>Staff</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}>
                 {/* The shop owner appears when their "Bookable" toggle is ON */}
                 {barber.isBookable !== false && (
@@ -532,12 +556,13 @@ export default function ClientBarberDetailScreen() {
                     }}
                   />
                 )}
-                {MOCK_SHOP_STAFF.map((st) => (
+                {staff.map((st) => (
                   <StaffFaceCard
                     key={st.id}
                     name={st.name}
                     role={st.role}
                     rating={st.rating}
+                    avatarUrl={st.avatarUrl}
                     onPress={() => {
                       tapLight();
                       router.push({ pathname: '/(client)/staff-profile', params: { staffId: st.id, barberId: id, shopName: title } } as never);
@@ -550,23 +575,31 @@ export default function ClientBarberDetailScreen() {
 
           {/* ── Reviews (recent 5; single See-all button below) ──── */}
           <SectionAnchor name="Reviews">
-            <Text style={{ fontSize: 22, fontWeight: '800', color: T.text, paddingHorizontal: 20, marginTop: 30, marginBottom: 8 }}>Reviews</Text>
+            <Text style={{ fontSize: 18, fontWeight: '600', color: '#2a6f97', paddingHorizontal: 20, marginTop: 30, marginBottom: 8 }}>Reviews</Text>
             <View style={{ paddingHorizontal: 20 }}>
-              {recentReviews.map((r, i) => (
-                <ReviewRow key={r.id} review={r} isFirst={i === 0} />
-              ))}
-              <Pressable
-                onPress={() => { tapLight(); router.push(`/(client)/barber/${id}/reviews` as never); }}
-                style={{ borderWidth: HAIRLINE, borderColor: T.border, borderRadius: 999, paddingVertical: 14, alignItems: 'center', marginTop: 8 }}
-              >
-                <Text style={{ fontSize: 15, fontWeight: '700', color: T.text }}>See all reviews</Text>
-              </Pressable>
+              {recentReviews.length === 0 ? (
+                <Text style={{ fontSize: 14, color: T.textFaint, lineHeight: 20, paddingVertical: 10 }}>
+                  No reviews yet. Be the first to book and leave one.
+                </Text>
+              ) : (
+                <>
+                  {recentReviews.map((r, i) => (
+                    <ReviewRow key={r.id} review={r} isFirst={i === 0} />
+                  ))}
+                  <Pressable
+                    onPress={() => { tapLight(); router.push(`/(client)/barber/${id}/reviews` as never); }}
+                    style={{ borderWidth: HAIRLINE, borderColor: T.border, borderRadius: 999, paddingVertical: 14, alignItems: 'center', marginTop: 8 }}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: T.text }}>See all reviews</Text>
+                  </Pressable>
+                </>
+              )}
             </View>
           </SectionAnchor>
 
           {/* ── Portfolio (own section — not mixed into the cover) ─ */}
           <SectionAnchor name="Portfolio">
-            <Text style={{ fontSize: 22, fontWeight: '800', color: T.text, paddingHorizontal: 20, marginTop: 30, marginBottom: 12 }}>Portfolio</Text>
+            <Text style={{ fontSize: 18, fontWeight: '600', color: '#2a6f97', paddingHorizontal: 20, marginTop: 30, marginBottom: 12 }}>Portfolio</Text>
             {portfolio.length === 0 ? (
               <View style={{ marginHorizontal: 20, backgroundColor: T.input, borderRadius: 16, paddingVertical: 26, alignItems: 'center', gap: 8 }}>
                 <Scissors size={26} color={T.textDisabled} />
@@ -575,7 +608,7 @@ export default function ClientBarberDetailScreen() {
             ) : (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: GRID_GAP, paddingHorizontal: 20 }}>
                 {portfolio.map((uri, i) => (
-                  <Pressable key={i} onPress={() => { tapLight(); setViewerUri(uri); }}>
+                  <Pressable key={i} onPress={() => { tapLight(); openViewer(portfolio, i); }}>
                     <Image source={{ uri }} style={{ width: gridW, height: gridW, borderRadius: 12 }} resizeMode="cover" />
                   </Pressable>
                 ))}
@@ -585,7 +618,7 @@ export default function ClientBarberDetailScreen() {
 
           {/* ── About ────────────────────────────────────────────── */}
           <SectionAnchor name="About">
-            <Text style={{ fontSize: 22, fontWeight: '800', color: T.text, paddingHorizontal: 20, marginTop: 30, marginBottom: 8 }}>About</Text>
+            <Text style={{ fontSize: 18, fontWeight: '600', color: '#2a6f97', paddingHorizontal: 20, marginTop: 30, marginBottom: 8 }}>About</Text>
             <View style={{ paddingHorizontal: 20 }}>
               <Text style={{ fontSize: 15, color: T.textMuted, lineHeight: 23 }}>
                 {barber.bio || `${title} is on Trimova. Book an appointment to experience their services.`}
@@ -604,11 +637,11 @@ export default function ClientBarberDetailScreen() {
               )}
               <Pressable
                 onPress={openDirections}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12, backgroundColor: T.input, borderRadius: 14, padding: 14 }}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12, backgroundColor: '#fff', borderRadius: 14, padding: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.17, shadowRadius: 8, elevation: 4 }}
               >
                 <Navigation size={17} color={T.accent} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: T.text }}>Get directions</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: T.text }}>Get directions</Text>
                   <Text style={{ fontSize: 12, color: T.textFaint, marginTop: 1 }} numberOfLines={1}>
                     {barber.locationAddress ?? 'Open in maps'}
                   </Text>
@@ -619,18 +652,18 @@ export default function ClientBarberDetailScreen() {
               {barber.phone ? (
                 <Pressable
                   onPress={callShop}
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10, backgroundColor: T.input, borderRadius: 14, padding: 14 }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10, backgroundColor: '#fff', borderRadius: 14, padding: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.17, shadowRadius: 8, elevation: 4 }}
                 >
                   <Phone size={17} color={T.accent} />
                   <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '700', color: T.text }}>Call {isShop ? 'the shop' : 'the barber'}</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: T.text }}>Call {isShop ? 'the shop' : 'the barber'}</Text>
                     <Text style={{ fontSize: 12, color: T.textFaint, marginTop: 1 }}>{barber.phone}</Text>
                   </View>
                   <ChevronRight size={16} color={T.textFaint} />
                 </Pressable>
               ) : null}
 
-              <Text style={{ fontSize: 22, fontWeight: '800', color: T.text, marginTop: 28, marginBottom: 12 }}>
+              <Text style={{ fontSize: 18, fontWeight: '600', color: '#2a6f97', marginTop: 28, marginBottom: 12 }}>
                 Opening times
               </Text>
               {barber.workingHours && barber.workingHours.length > 0 ? (
@@ -638,9 +671,9 @@ export default function ClientBarberDetailScreen() {
                   const isToday = d.day === new Date().toLocaleDateString('en-US', { weekday: 'long' });
                   return (
                     <View key={d.day} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10 }}>
-                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: d.isOpen ? T.onSuccess : T.border, marginRight: 14 }} />
-                      <Text style={{ flex: 1, fontSize: 15.5, fontWeight: isToday ? '800' : '500', color: T.text }}>{d.day}</Text>
-                      <Text style={{ fontSize: 15, fontWeight: isToday ? '800' : '500', color: d.isOpen ? T.text : T.textFaint }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: d.isOpen ? '#52b788' : T.border, marginRight: 14 }} />
+                      <Text style={{ flex: 1, fontSize: 14, fontWeight: isToday ? '700' : '500', color: T.text }}>{d.day}</Text>
+                      <Text style={{ fontSize: 14, fontWeight: isToday ? '700' : '500', color: d.isOpen ? T.text : T.textFaint }}>
                         {d.isOpen ? `${fmt12(d.openTime)} – ${fmt12(d.closeTime)}` : 'Closed'}
                       </Text>
                     </View>
@@ -676,7 +709,7 @@ export default function ClientBarberDetailScreen() {
                 const on = s === activeSection;
                 return (
                   <Pressable key={s} onPress={() => jumpTo(s)} style={{ paddingHorizontal: 11, paddingVertical: 13 }}>
-                    <Text style={{ fontSize: 15, fontWeight: on ? '800' : '600', color: on ? T.text : T.textFaint }}>{s}</Text>
+                    <Text style={{ fontSize: 14, fontWeight: on ? '700' : '500', color: on ? T.text : T.textFaint }}>{s}</Text>
                     {on && <View style={{ position: 'absolute', bottom: 0, left: 11, right: 11, height: 2.5, borderRadius: 2, backgroundColor: T.text }} />}
                   </Pressable>
                 );
@@ -697,21 +730,60 @@ export default function ClientBarberDetailScreen() {
           </Text>
           <Pressable
             onPress={() => handleBook()}
-            style={{ backgroundColor: T.text, borderRadius: 999, paddingHorizontal: 32, paddingVertical: 15, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 10, elevation: 6 }}
+            style={{ backgroundColor: '#023047', borderRadius: 999, paddingHorizontal: 32, paddingVertical: 15, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 10, elevation: 6 }}
           >
-            <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: '800' }}>Book now</Text>
+            <Text style={{ color: '#ffffff', fontSize: 14, fontWeight: '600' }}>Book now</Text>
           </Pressable>
         </LinearGradient>
       </View>
 
       {/* ── Fullscreen photo viewer ─────────────────────────────── */}
-      <Modal visible={viewerUri !== null} transparent animationType="fade" onRequestClose={() => setViewerUri(null)}>
+      <Modal
+        visible={viewerIndex !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewerIndex(null)}
+      >
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center' }}>
-          {viewerUri && (
-            <Image source={{ uri: viewerUri }} style={{ width: '100%', height: '80%' }} resizeMode="contain" />
+          {viewerIndex !== null && (
+            <FlatList
+              data={viewerPhotos}
+              keyExtractor={(uri, i) => `${uri}-${i}`}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              // Open on the photo they actually tapped, then let them swipe on.
+              initialScrollIndex={viewerIndex}
+              getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
+              onMomentumScrollEnd={(e) => {
+                const next = Math.round(e.nativeEvent.contentOffset.x / width);
+                if (next !== viewerIndex) setViewerIndex(next);
+              }}
+              renderItem={({ item }) => (
+                <View style={{ width, justifyContent: 'center' }}>
+                  <Image source={{ uri: item }} style={{ width, height: '80%' }} resizeMode="contain" />
+                </View>
+              )}
+            />
           )}
+
+          {/* Position within the set — otherwise there's no hint more exist. */}
+          {viewerIndex !== null && viewerPhotos.length > 1 && (
+            <View
+              style={{
+                position: 'absolute', bottom: insets.bottom + 28, alignSelf: 'center',
+                backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 999,
+                paddingHorizontal: 14, paddingVertical: 7,
+              }}
+            >
+              <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '600' }}>
+                {viewerIndex + 1} of {viewerPhotos.length}
+              </Text>
+            </View>
+          )}
+
           <Pressable
-            onPress={() => setViewerUri(null)}
+            onPress={() => setViewerIndex(null)}
             style={{ position: 'absolute', top: insets.top + 12, right: 16, width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' }}
           >
             <X size={22} color="#ffffff" />

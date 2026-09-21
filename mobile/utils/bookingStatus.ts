@@ -14,6 +14,12 @@ export type StatusTone = 'success' | 'warn' | 'error' | 'info' | 'neutral';
 export function bookingBadge(booking: Booking): { label: string; tone: StatusTone } {
   switch (booking.status) {
     case 'completed':
+      // A completed booking whose money is still held is not finished from the
+      // client's point of view — they're the only one who can close it out.
+      if (booking.disputedAt) return { label: 'Under review', tone: 'error' };
+      if (awaitingConfirmation(booking)) {
+        return { label: 'Confirm it happened', tone: 'warn' };
+      }
       return { label: 'Completed', tone: 'success' };
     case 'cancelled':
       return { label: 'Cancelled', tone: 'error' };
@@ -27,7 +33,9 @@ export function bookingBadge(booking: Booking): { label: string; tone: StatusTon
       if (booking.requiresApproval && !booking.approvedAt) {
         return { label: 'Awaiting barber', tone: 'warn' };
       }
-      return { label: 'Payment due', tone: 'warn' };
+      // Money owed on a clock is urgent, not merely noteworthy — amber reads
+      // as "eventually", and the slot is released if they leave it.
+      return { label: 'Payment due', tone: 'error' };
     default:
       return { label: booking.status, tone: 'neutral' };
   }
@@ -36,6 +44,23 @@ export function bookingBadge(booking: Booking): { label: string; tone: StatusTon
 /** Still ahead of the client — anything they might still turn up for. */
 export function isUpcoming(booking: Booking): boolean {
   return ['pending', 'confirmed', 'in_progress'].includes(booking.status);
+}
+
+/**
+ * The appointment is done, the money is still held, and the client hasn't
+ * said either way — so it's fair to ask whether it actually happened.
+ *
+ * Unpaid bookings are excluded: there's nothing to release, so nothing to
+ * confirm. Once released, the question is moot and support handles it.
+ */
+export function awaitingConfirmation(booking: Booking): boolean {
+  return (
+    booking.status === 'completed' &&
+    booking.paymentStatus === 'paid' &&
+    !booking.releasedAt &&
+    !booking.clientConfirmedAt &&
+    !booking.disputedAt
+  );
 }
 
 /** The client owes money and is allowed to pay it right now. */

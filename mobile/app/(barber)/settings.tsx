@@ -25,6 +25,7 @@ import {
   Trophy,
 } from 'lucide-react-native';
 import { useAuthStore } from '@/stores/authStore';
+import type { BarberProfile } from '@/types/user';
 import { useThemeColors } from '@/hooks/useThemeColors';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { SupportIdCard } from '@/components/ui/SupportIdCard';
@@ -32,11 +33,10 @@ import { authService } from '@/services/auth';
 
 // ─── Mock shops for the workspace switcher ─────────────────────────────────────
 
-const MOCK_SHOPS = [
-  { id: 'shop_1', name: 'A4N Cutz – East Legon', location: 'East Legon, Accra', isActive: true },
-  { id: 'shop_2', name: 'A4N Cutz – Kumasi',     location: 'Adum, Kumasi',       isActive: false },
-  { id: 'shop_3', name: 'Royale Cuts & Grooming', location: 'Osu, Accra',        isActive: false },
-];
+// Working at more than one shop needs a shop_staff join table, which the
+// database doesn't model yet. Until it does, a barber has exactly one
+// workspace — their own — and this sheet shows that rather than inventing a
+// list of shops they could switch to.
 
 // ─── Row components ───────────────────────────────────────────────────────────
 
@@ -88,12 +88,19 @@ function WorkspaceSwitcherModal({
 }) {
   const insets = useSafeAreaInsets();
   const c = useThemeColors();
-  const [activeShopId, setActiveShopId] = useState('shop_1');
+  const { user } = useAuthStore();
+  const barber = user as (BarberProfile & { locationAddress?: string | null }) | null;
 
-  function switchShop(id: string) {
-    setActiveShopId(id);
-    onClose();
-  }
+  const shops = barber
+    ? [
+        {
+          id: barber.id,
+          name: barber.businessName || barber.fullName || 'My workspace',
+          location: barber.locationAddress || 'Location not set',
+        },
+      ]
+    : [];
+  const activeShopId = barber?.id ?? '';
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -105,13 +112,13 @@ function WorkspaceSwitcherModal({
           <Pressable onPress={onClose} hitSlop={10}><X size={22} color={c.textMuted} /></Pressable>
         </View>
 
-        {MOCK_SHOPS.map((shop, i) => {
+        {shops.map((shop, i) => {
           const isActive = shop.id === activeShopId;
           return (
             <View key={shop.id}>
               {i > 0 && <View style={{ height: 1, backgroundColor: c.border, marginHorizontal: 20 }} />}
               <Pressable
-                onPress={() => switchShop(shop.id)}
+                onPress={onClose}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20, paddingVertical: 16 }}
               >
                 <View style={{
@@ -139,7 +146,8 @@ function WorkspaceSwitcherModal({
 
         <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>
           <Text style={{ fontSize: 12, color: c.textFaint, textAlign: 'center', lineHeight: 18 }}>
-            Switching shops updates your entire workspace — bookings, staff, and services — instantly.
+            You&apos;re working in one shop. Joining a second team will let you switch
+            between workspaces here.
           </Text>
         </View>
       </View>

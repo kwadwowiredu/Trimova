@@ -34,11 +34,19 @@ export interface Booking {
   completedAt: string | null;
   cancelledAt: string | null;
   cancelReason: string | null;
+  /** Set when the client confirmed the service actually happened. */
+  clientConfirmedAt: string | null;
+  /** Set when the client reported it didn't. Freezes the money. */
+  disputedAt: string | null;
+  /** Set when escrow was released to the barber. */
+  releasedAt: string | null;
   clientLocation: BookingLocation | null;
   notes: string | null;
   /** Whoever is actually cutting — the staff member if there is one. */
   barberName: string;
   barberAvatarUrl: string | null;
+  /** Who the CLIENT would ring about this appointment. */
+  barberPhone: string | null;
   /** The business the booking sits under. */
   shopName: string;
   clientName: string;
@@ -79,6 +87,22 @@ export interface DayAvailability {
 export interface MonthAvailability {
   dates: Record<string, { available: boolean; slotCount: number }>;
   leadMinutes: number;
+}
+
+/**
+ * What the cancellation policy costs for a booking, right now. The API is the
+ * authority — the app displays this rather than recomputing the rules.
+ */
+export interface CancellationOutcome {
+  /** 0, 0.5 or 1 — the share of the total that would be forfeited. */
+  feeRate: number;
+  feeAmount: number;
+  refundAmount: number;
+  /** Hours until the appointment; negative once it has started. */
+  hoursUntil: number;
+  /** Plain-language line to show in the confirmation prompt. */
+  summary: string;
+  total: number;
 }
 
 export interface PaymentInit {

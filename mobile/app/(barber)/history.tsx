@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,8 @@ import {
   RotateCcw,
 } from 'lucide-react-native';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { useQuery } from '@tanstack/react-query';
+import { bookingsService } from '@/services/bookings';
 import { useThemeColors } from '@/hooks/useThemeColors';
 
 interface HistoryItem {
@@ -34,24 +36,50 @@ interface HistoryItem {
   isArchived: boolean;
 }
 
-const MOCK_HISTORY: HistoryItem[] = [
-  { id: '1',  clientName: 'Kwame Mensah',  serviceName: 'Executive Fade',  date: '15 Jun 2026', time: '10:00', price: 80,  staffName: 'Kwadwo Yiadom', isArchived: false },
-  { id: '2',  clientName: 'Ama Boateng',   serviceName: 'Haircut & Beard', date: '14 Jun 2026', time: '11:30', price: 100, staffName: 'Kwame Mensah',  isArchived: false },
-  { id: '3',  clientName: 'Kofi Asante',   serviceName: 'Beard Trim',      date: '13 Jun 2026', time: '14:00', price: 50,  staffName: 'Kofi Asare',    isArchived: false },
-  { id: '4',  clientName: 'Yaw Mensah',    serviceName: 'Skin Fade',       date: '12 Jun 2026', time: '09:00', price: 90,  staffName: 'Kwadwo Yiadom', isArchived: false },
-  { id: '5',  clientName: 'Abena Osei',    serviceName: 'Kids Haircut',    date: '11 Jun 2026', time: '15:00', price: 45,  staffName: 'Ama Boateng',   isArchived: false },
-  { id: '6',  clientName: 'Fiifi Andoh',   serviceName: 'Haircut & Beard', date: '10 Jun 2026', time: '16:30', price: 100, staffName: 'Kwadwo Yiadom', isArchived: false },
-  { id: '7',  clientName: 'Akua Frempong', serviceName: 'Shampoo & Style', date: '9 Jun 2026',  time: '11:00', price: 70,  staffName: 'Ama Boateng',   isArchived: false },
-  { id: '8',  clientName: 'Nana Kwame',    serviceName: 'Executive Fade',  date: '8 Jun 2026',  time: '13:00', price: 80,  staffName: 'Kofi Asare',    isArchived: false },
-  { id: '9',  clientName: 'Esi Boateng',   serviceName: 'Beard Trim',      date: '5 Jun 2026',  time: '10:30', price: 50,  staffName: 'Kwadwo Yiadom', isArchived: true },
-  { id: '10', clientName: 'Kojo Mensah',   serviceName: 'Executive Fade',  date: '3 Jun 2026',  time: '14:00', price: 80,  staffName: 'Kofi Asare',    isArchived: true },
-];
-
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
   const c = useThemeColors();
 
-  const [items,       setItems]      = useState<HistoryItem[]>(MOCK_HISTORY);
+  // Every appointment that's been closed out, either finished or called off.
+  const { data } = useQuery({
+    queryKey: ['bookings', 'barber', 'history'],
+    queryFn: () =>
+      bookingsService.getBarberBookings({
+        status: 'completed,cancelled,declined',
+        page: 1,
+      }),
+  });
+
+  const history: HistoryItem[] = useMemo(
+    () =>
+      (data?.data.data ?? []).map((b) => {
+        const when = new Date(b.scheduledAt);
+        return {
+          id: b.id,
+          clientName: b.clientName,
+          serviceName: b.serviceName,
+          date: when.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+          time: b.scheduledAt.slice(11, 16),
+          price: b.total,
+          // Who performed it — the staff member if there was one.
+          staffName: b.barberName,
+          // Archiving is a local view preference, not something the API stores.
+          isArchived: false,
+        };
+      }),
+    [data],
+  );
+
+  const [items, setItems] = useState<HistoryItem[]>([]);
+
+  // Keep local archive flags while folding in whatever the server returns.
+  useEffect(() => {
+    setItems((prev) => {
+      const archived = new Set(prev.filter((i) => i.isArchived).map((i) => i.id));
+      return history.map((i) => (archived.has(i.id) ? { ...i, isArchived: true } : i));
+    });
+  }, [history]);
+
   const [tab,         setTab]        = useState<'active' | 'archived'>('active');
   const [isSelectMode, setSelectMode] = useState(false);
   const [selected,    setSelected]   = useState<Set<string>>(new Set());
@@ -91,7 +119,8 @@ export default function HistoryScreen() {
     setSelected(new Set());
     setSelectMode(false);
     showToast();
-    // TODO: PATCH /api/barber/appointments/:id/archive for each id
+    // Archiving hides a row from this list only — the appointment record
+    // itself is the money trail and stays exactly as it is.
   }
 
   function handleUnarchive() {
@@ -99,7 +128,7 @@ export default function HistoryScreen() {
     setItems((prev) => prev.map((i) => i.id === unarchiveId ? { ...i, isArchived: false } : i));
     setUnarchiveId(null);
     showToast();
-    // TODO: PATCH /api/barber/appointments/:id/unarchive
+
   }
 
   function exitSelectMode() {
